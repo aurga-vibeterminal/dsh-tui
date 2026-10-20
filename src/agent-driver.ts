@@ -106,6 +106,20 @@ export async function createDriver(
   await agent.whenIdle()
 
   let running = agent.status === 'running'
+  // Exceptions inside Cordis event listeners are fatal to the process;
+  // degrade to a transcript notice instead.
+  const safeApply = (label: string, action: () => void): void => {
+    try {
+      action()
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      try {
+        model.pushNotice(`· ui error (${label}): ${message.slice(0, 120)}`, 'error')
+      } catch {
+        // Last resort: swallow to keep the process alive.
+      }
+    }
+  }
   const stopStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
     if (subject === agent) running = status === 'running'
   })
@@ -116,10 +130,10 @@ export async function createDriver(
     }
   })
   const stopEvents = ctx.on('session/event', (session, event) => {
-    if (session === agent.session) model.applyEvent(event)
+    if (session === agent.session) safeApply('event', () => model.applyEvent(event))
   })
   const stopStream = ctx.on('agent/assistant-stream', ({ agent: subject, frame }) => {
-    if (subject === agent) model.applyFrame(frame as AssistantStreamFrameLike)
+    if (subject === agent) safeApply('stream', () => model.applyFrame(frame as AssistantStreamFrameLike))
   })
 
   return {

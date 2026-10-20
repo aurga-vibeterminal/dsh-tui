@@ -8,6 +8,7 @@ const absent = {
   theme: undefined,
   prompt: undefined,
   record: undefined,
+  interruptAfterMs: undefined,
 }
 
 describe('parseTuiArgs', () => {

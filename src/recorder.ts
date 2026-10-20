@@ -35,6 +35,8 @@ export interface RecordOptions {
   outDir: string
   /** The prompt text driving the recorded turn. */
   prompt: string
+  /** Interrupt the turn after this many milliseconds (0 = immediately). */
+  interruptAfterMs: number | undefined
 }
 
 /** One recorded live stream frame, exactly as the event carried it. */
@@ -46,6 +48,7 @@ type StreamRecord = { frame: unknown }
  * @param options - output directory and the driving prompt.
  */
 export async function recordFixture(ctx: Context, options: RecordOptions): Promise<void> {
+  process.stderr.write(`record: fixture run (interruptAfterMs=${String(options.interruptAfterMs)})\n`)
   // Sibling rows must settle before an Agent is created.
   await ctx.get('loader')?.await()
   const agents = ctx.get('agents')
@@ -86,6 +89,21 @@ export async function recordFixture(ctx: Context, options: RecordOptions): Promi
       content: [{ type: 'text', text: options.prompt }],
       source: { kind: 'user' },
     }))
+    process.stderr.write('record: prompt sent\n')
+    const stopProgress = ctx.on('agent/status', ({ agent: subject, status }) => {
+      if (subject === agent) process.stderr.write(`record: status=${status}\n`)
+    })
+    if (options.interruptAfterMs !== undefined) {
+      const timer = setTimeout(() => {
+        try {
+          agent.cancel({ kind: 'user' }, { keepInbox: true })
+          process.stderr.write('record: cancel requested\n')
+        } catch (error: unknown) {
+          process.stderr.write(`record: cancel threw: ${error instanceof Error ? error.message : String(error)}\n`)
+        }
+      }, options.interruptAfterMs)
+      timer.unref()
+    }
     const subagents = ctx.get('subagents')
     while (true) {
       await agent.whenIdle()
@@ -94,6 +112,8 @@ export async function recordFixture(ctx: Context, options: RecordOptions): Promi
       if (!await subagents?.waitForChildren(agent)
         && agent.status === 'idle' && agent.session.seq === idleSeq) break
     }
+    process.stderr.write('record: idle reached\n')
+    stopProgress()
   } finally {
     stopEvents()
     stopStream()

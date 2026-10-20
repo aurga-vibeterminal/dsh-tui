@@ -108,12 +108,30 @@ export class TuiApp {
       this.header.setText(headerLine(model, driver))
       this.hints.setText(hintsLine(driver))
     }
+    // Exceptions inside event listeners and render callbacks would take down
+    // the whole process (uncaught in a timer/stdin context); degrade to a
+    // visible notice and a log line instead.
+    const guard = (action: () => void, label: string): void => {
+      try {
+        action()
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.log.debug(`${label} failed: ${message}`)
+        try {
+          model.pushNotice(`· ui error (${label}): ${message.slice(0, 120)}`, 'error')
+        } catch {
+          // Pushing the notice itself failed; the log line above is all we can do.
+        }
+      }
+    }
     this.disposers.push(model.onChange(() => {
-      // The transcript's cached lines are stale the moment the model moved;
-      // without this invalidate the viewport never shows new items.
-      this.transcript.invalidate()
-      render()
-      this.tui.requestRender()
+      guard(() => {
+        // The transcript's cached lines are stale the moment the model moved;
+        // without this invalidate the viewport never shows new items.
+        this.transcript.invalidate()
+        render()
+        this.tui.requestRender()
+      }, 'render')
     }))
     render()
   }
@@ -130,36 +148,51 @@ export class TuiApp {
     // Global keys run before the focused editor.
     let lastInterrupt = 0
     this.tui.addInputListener((data) => {
-      if (matchesKey(data, Key.ctrl('q'))) {
-        finish(0)
-        return { consume: true }
-      }
-      if (matchesKey(data, Key.ctrl('c'))) {
-        if (this.driver.running) {
+      try {
+        if (matchesKey(data, Key.ctrl('q'))) {
+          finish(0)
+          return { consume: true }
+        }
+        if (matchesKey(data, Key.ctrl('c'))) {
+          if (this.driver.running) {
+            this.driver.cancel()
+            return { consume: true }
+          }
+          const now = Date.now()
+          if (now - lastInterrupt < 1500) {
+            finish(0)
+          } else {
+            lastInterrupt = now
+            this.driver.model.pushNotice('· press ctrl+c again to quit')
+          }
+          return { consume: true }
+        }
+        if (matchesKey(data, Key.escape) && this.driver.running) {
           this.driver.cancel()
           return { consume: true }
         }
-        const now = Date.now()
-        if (now - lastInterrupt < 1500) {
-          finish(0)
-        } else {
-          lastInterrupt = now
-          this.driver.model.pushNotice('· press ctrl+c again to quit')
-        }
+        return undefined
+      } catch (error: unknown) {
+        // An input-handler exception would crash the process from inside the
+        // stdin data handler; surface it in-UI instead.
+        const message = error instanceof Error ? error.message : String(error)
+        this.log.debug(`input handler failed: ${message}`)
+        this.driver.model.pushNotice(`· ui error (input): ${message.slice(0, 120)}`, 'error')
         return { consume: true }
       }
-      if (matchesKey(data, Key.escape) && this.driver.running) {
-        this.driver.cancel()
-        return { consume: true }
-      }
-      return undefined
     })
 
     this.editor.onSubmit = (text: string): void => {
       const trimmed = text.trim()
       if (trimmed === '') return
-      if (this.driver.running) this.driver.model.pushNotice(`(queued: ${firstLineOf(trimmed)})`)
-      this.driver.send(trimmed)
+      try {
+        if (this.driver.running) this.driver.model.pushNotice(`(queued: ${firstLineOf(trimmed)})`)
+        this.driver.send(trimmed)
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.log.debug(`submit failed: ${message}`)
+        this.driver.model.pushNotice(`· send failed: ${message.slice(0, 120)}`, 'error')
+      }
     }
 
     this.tui.start()

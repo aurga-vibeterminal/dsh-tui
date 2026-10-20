@@ -40,6 +40,8 @@ export interface TuiStartupValues {
   prompt: string | undefined
   /** Dev tooling: record one turn's raw events into this directory, then exit. */
   record: string | undefined
+  /** Dev tooling (with --record): interrupt the turn after this many ms. */
+  interruptAfterMs: number | undefined
 }
 
 /** Commander option shape of this app's program. */
@@ -49,6 +51,8 @@ interface TuiOptions {
   reasoningEffort?: string | undefined
   theme?: string | undefined
   record?: string | undefined
+  /** Commander exposes `--interrupt-after <ms>` under this key (no -Ms suffix). */
+  interruptAfter?: string | undefined
 }
 
 /**
@@ -66,6 +70,7 @@ export function tuiCommand(): Command {
     .option('--reasoning-effort <id>', 'adapter-owned reasoning effort for the selected route')
     .option('--theme <name>', 'UI theme name (default: dark)')
     .addOption(new Option('--record <dir>', 'dev: record one turn of raw events to <dir> as test fixtures, then exit').hideHelp())
+    .addOption(new Option('--interrupt-after <ms>', 'dev: with --record, interrupt the turn after this many milliseconds').hideHelp())
     .argument('[prompt...]', 'initial prompt text; required with --record')
     .addHelpText('after', `
 Examples:
@@ -108,6 +113,18 @@ function valuesFromOptions(options: TuiOptions, args: readonly string[], error: 
   if (record !== undefined && record.trim() === '') {
     error('--record requires a non-empty output directory')
   }
+  const rawInterruptAfter = options.interruptAfter
+  let interruptAfterMs: number | undefined
+  if (rawInterruptAfter !== undefined) {
+    const parsed = Number(rawInterruptAfter)
+    if (rawInterruptAfter.trim() === '' || !Number.isInteger(parsed) || parsed < 0) {
+      error('--interrupt-after expects a non-negative integer milliseconds value')
+    }
+    interruptAfterMs = parsed
+  }
+  if (interruptAfterMs !== undefined && record === undefined) {
+    error('--interrupt-after requires --record')
+  }
   const prompt = args.length === 0 ? undefined : args.join(' ')
   if (prompt !== undefined && prompt.trim() === '') {
     error('a prompt must contain non-whitespace text')
@@ -115,7 +132,7 @@ function valuesFromOptions(options: TuiOptions, args: readonly string[], error: 
   if (record !== undefined && prompt === undefined) {
     error('--record requires a prompt to drive the recorded turn')
   }
-  return { resume, model, reasoningEffort, theme, prompt, record }
+  return { resume, model, reasoningEffort, theme, prompt, record, interruptAfterMs }
 }
 
 /**

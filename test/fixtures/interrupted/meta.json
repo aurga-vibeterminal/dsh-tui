@@ -1,0 +1,11 @@
+{
+  "sessionId": "session-b3c16004-289e-401b-bf9c-bbfd724c36ca",
+  "prompt": "写一个很长的故事",
+  "cwd": "D:\\projects\\dsh-tui",
+  "provider": "deepseek-official",
+  "model": "deepseek-flash",
+  "recordedAt": "2026-10-20T08:59:05.617Z",
+  "eventCount": 18,
+  "frameCount": 2,
+  "statusCount": 2
+}

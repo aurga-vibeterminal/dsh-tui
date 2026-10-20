@@ -37,6 +37,8 @@ export interface Config {
   prompt?: string
   /** Dev tooling: record one turn's raw events into this directory, then exit. */
   record?: string
+  /** Dev tooling: with --record, interrupt the turn after this many ms. */
+  interruptAfterMs?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -45,6 +47,7 @@ export const Config: z<Config> = z.object({
   theme: z.string(),
   prompt: z.string(),
   record: z.string(),
+  interruptAfterMs: z.number(),
 })
 
 /** Split one `provider/model` config string into its route parts. */
@@ -64,7 +67,11 @@ export function apply(ctx: Context, config: Config): void {
       if (config.prompt === undefined || config.prompt.trim() === '') {
         throw new Error('tui-runner: --record requires a prompt')
       }
-      await recordFixture(ctx, { outDir: config.record, prompt: config.prompt })
+      await recordFixture(ctx, {
+        outDir: config.record,
+        prompt: config.prompt,
+        interruptAfterMs: config.interruptAfterMs,
+      })
       process.stdout.write(`dsh-tui: fixture recorded to ${config.record}\n`)
       exit(0)
       return

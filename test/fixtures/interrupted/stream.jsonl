@@ -1,0 +1,2 @@
+{"frame":{"type":"start","attemptId":"session-b3c16004-289e-401b-bf9c-bbfd724c36ca:1","revision":1,"turn":1,"step":1}}
+{"frame":{"type":"end","attemptId":"session-b3c16004-289e-401b-bf9c-bbfd724c36ca:1","revision":2,"index":0,"outcome":{"kind":"committed","eventType":"assistant/attempt","seq":18}}}

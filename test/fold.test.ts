@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { visibleWidth } from '@earendil-works/pi-tui'
 import { TranscriptModel, type AssistantStreamFrameLike } from '../src/events.ts'
 import { TranscriptView } from '../src/components/transcript.ts'
 import { markdownThemeFor, themeByName } from '../src/theme.ts'
@@ -171,8 +172,37 @@ describe('TranscriptModel · notices and unknown events', () => {
   })
 })
 
-describe('app wiring · model changes must invalidate the transcript view', () => {
-  it('re-renders new items when wired through onChange→invalidate (regression)', () => {
+describe('interrupted turn · fold and render the aborted state', () => {
+  const { events, frames } = loadFixture('interrupted')
+
+  it('folds a cancelled turn without throwing and renders it at every width', () => {
+    const theme = themeByName('dark')
+    const model = new TranscriptModel()
+    const view = new TranscriptView(model.items, { theme, markdownTheme: markdownThemeFor(theme) })
+    const dispose = model.onChange(() => {
+      view.invalidate()
+    })
+
+    for (const record of interleaved(events, frames)) {
+      if ('seq' in record && 'type' in record && typeof record.seq === 'number') model.applyEvent(record)
+      else model.applyFrame(record as AssistantStreamFrameLike)
+    }
+
+    // The abandoned attempt renders as a dim notice; the turn badge is aborted.
+    const notices = model.items.filter(item => item.kind === 'notice')
+    expect(notices.some(notice => notice.kind === 'notice' && notice.text.includes('turn aborted'))).toBe(true)
+
+    // Rendering the final state must not throw at common widths.
+    for (const width of [40, 60, 80, 120]) {
+      const lines = view.render(width)
+      expect(lines.length).toBeGreaterThan(0)
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width)
+    }
+    dispose()
+  })
+})
+
+describe('app wiring · model changes must invalidate the transcript view', () => {  it('re-renders new items when wired through onChange→invalidate (regression)', () => {
     const theme = themeByName('dark')
     const model = new TranscriptModel()
     const view = new TranscriptView(model.items, { theme, markdownTheme: markdownThemeFor(theme) })

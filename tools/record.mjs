@@ -23,7 +23,8 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 const args = process.argv.slice(2)
 const toolCall = args.includes('--tool-call')
-const positional = args.filter(argument => argument !== '--tool-call')
+const interrupt = args.includes('--interrupt')
+const positional = args.filter(argument => argument !== '--tool-call' && argument !== '--interrupt')
 const [name, ...promptParts] = positional
 const prompt = promptParts.join(' ')
 if (name === undefined || name.trim() === '' || prompt.trim() === '') {
@@ -51,10 +52,9 @@ const successText = [
   '平均时间复杂度 O(n log n)，最坏 O(n²)；实现简单，常用于内省排序的基础。',
 ].join('\n')
 
-// Tool-call scenario: first model call asks for `glob` (safe, read-only),
-// second call answers with the final text; a trailing success serves the
-// session-title request base fires after the turn settles.
-const sequence = toolCall
+// Interrupt scenario: the model call stalls, the turn is cancelled
+// mid-flight after a delay — the exact surface Ctrl+C exercises.
+const sequence = interrupt ? ['stall', 'success', 'success'] : toolCall
   ? ['tool_call_success', 'success', 'success']
   : ['reasoning_success', 'success']
 
@@ -76,17 +76,29 @@ await mkdir(outDir, { recursive: true })
 
 // Async spawn: the mock server runs in this process, so the event loop must
 // stay alive to serve the harness's LLM requests while dsh runs.
-const run = spawn('dsh', ['--profile', 'tui', '--record', outDir, prompt], {
-  cwd: repoRoot,
-  stdio: 'inherit',
-  shell: process.platform === 'win32',
-  env: {
-    ...process.env,
-    DSH_HOME: join(repoRoot, '.dsh-test'),
-    DEEPSEEK_BASE_URL: `${server.baseURL}/v1`,
-    DEEPSEEK_API_KEY: 'mock-key',
-  },
-})
+const run = interrupt
+  ? spawn('dsh', ['--profile', 'tui', '--record', outDir, '--interrupt-after', '1200', prompt], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    env: {
+      ...process.env,
+      DSH_HOME: join(repoRoot, '.dsh-test'),
+      DEEPSEEK_BASE_URL: `${server.baseURL}/v1`,
+      DEEPSEEK_API_KEY: 'mock-key',
+    },
+  })
+  : spawn('dsh', ['--profile', 'tui', '--record', outDir, prompt], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    env: {
+      ...process.env,
+      DSH_HOME: join(repoRoot, '.dsh-test'),
+      DEEPSEEK_BASE_URL: `${server.baseURL}/v1`,
+      DEEPSEEK_API_KEY: 'mock-key',
+    },
+  })
 const exitCode = await new Promise((resolvePromise, rejectPromise) => {
   run.on('error', rejectPromise)
   run.on('exit', (code) => { resolvePromise(code) })
