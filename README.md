@@ -31,6 +31,15 @@ dsh plugin --profile tui add <repo-path>    # re-run after code changes
 dsh --profile tui
 ```
 
+For daily development the profile is also installed into the real `~/.dsh` (any shell: `dsh tui`); the install is a pnpm link to this repo, so `pnpm build` is the only step between edit and run (`pnpm dev` watches).
+
+Record event fixtures for tests (keyless, drives `dsh-llm-mock-server`):
+
+```sh
+pnpm record basic-chat "<prompt>"
+pnpm record tool-call "<prompt>" --tool-call   # scripted glob tool call
+```
+
 ## Known Limitations
 
 - Phase 0 skeleton: the runner prints resolved startup values and exits; the interactive loop lands in Phase 1.

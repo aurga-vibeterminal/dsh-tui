@@ -5,7 +5,7 @@
  * @module dsh-tui/startup
  */
 
-import { Command } from 'commander'
+import { Command, Option } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
 
@@ -36,6 +36,10 @@ export interface TuiStartupValues {
   reasoningEffort: string | undefined
   /** UI theme name; absent keeps the runner default. */
   theme: string | undefined
+  /** Initial prompt text; multiple words join with spaces. */
+  prompt: string | undefined
+  /** Dev tooling: record one turn's raw events into this directory, then exit. */
+  record: string | undefined
 }
 
 /** Commander option shape of this app's program. */
@@ -44,6 +48,7 @@ interface TuiOptions {
   model?: string | undefined
   reasoningEffort?: string | undefined
   theme?: string | undefined
+  record?: string | undefined
 }
 
 /**
@@ -60,6 +65,8 @@ export function tuiCommand(): Command {
     .option('--model <provider/model>', 'explicit model route; overrides the profile default')
     .option('--reasoning-effort <id>', 'adapter-owned reasoning effort for the selected route')
     .option('--theme <name>', 'UI theme name (default: dark)')
+    .addOption(new Option('--record <dir>', 'dev: record one turn of raw events to <dir> as test fixtures, then exit').hideHelp())
+    .argument('[prompt...]', 'initial prompt text; required with --record')
     .addHelpText('after', `
 Examples:
   dsh --profile tui                                    start a fresh session
@@ -74,7 +81,7 @@ Examples:
  * @param error - rejects the invocation (commander control-flow error).
  * @returns the values the runner consumes.
  */
-function valuesFromOptions(options: TuiOptions, error: (message: string) => never): TuiStartupValues {
+function valuesFromOptions(options: TuiOptions, args: readonly string[], error: (message: string) => never): TuiStartupValues {
   const resume = options.resume
   if (resume !== undefined && resume.trim() === '') {
     error('--resume requires a non-empty session id')
@@ -97,7 +104,18 @@ function valuesFromOptions(options: TuiOptions, error: (message: string) => neve
   if (theme !== undefined && theme.trim() === '') {
     error('--theme requires a non-empty name')
   }
-  return { resume, model, reasoningEffort, theme }
+  const record = options.record
+  if (record !== undefined && record.trim() === '') {
+    error('--record requires a non-empty output directory')
+  }
+  const prompt = args.length === 0 ? undefined : args.join(' ')
+  if (prompt !== undefined && prompt.trim() === '') {
+    error('a prompt must contain non-whitespace text')
+  }
+  if (record !== undefined && prompt === undefined) {
+    error('--record requires a prompt to drive the recorded turn')
+  }
+  return { resume, model, reasoningEffort, theme, prompt, record }
 }
 
 /**
@@ -111,7 +129,7 @@ export function apply(ctx: Context): void {
   program.action(() => {
     ctx.provide(
       TUI_STARTUP_SERVICE,
-      valuesFromOptions(program.opts<TuiOptions>(), message => program.error(`error: ${message}`)),
+      valuesFromOptions(program.opts<TuiOptions>(), program.args, message => program.error(`error: ${message}`)),
     )
   })
   parseCmdline(ctx, program)
@@ -127,7 +145,7 @@ export function parseTuiArgs(argv: readonly string[]): TuiStartupValues {
   const program = tuiCommand().exitOverride()
   let captured: TuiStartupValues | undefined
   program.action(() => {
-    captured = valuesFromOptions(program.opts<TuiOptions>(), message => program.error(`error: ${message}`))
+    captured = valuesFromOptions(program.opts<TuiOptions>(), program.args, message => program.error(`error: ${message}`))
   })
   program.parse([...argv], { from: 'user' })
   if (captured === undefined) {

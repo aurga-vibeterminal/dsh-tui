@@ -17,6 +17,7 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import { recordFixture } from './recorder.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-runner'
@@ -32,12 +33,18 @@ export interface Config {
   model?: string
   /** UI theme name. */
   theme?: string
+  /** Initial prompt text (used by --record). */
+  prompt?: string
+  /** Dev tooling: record one turn's raw events into this directory, then exit. */
+  record?: string
 }
 
 export const Config: z<Config> = z.object({
   resume: z.string(),
   model: z.string(),
   theme: z.string(),
+  prompt: z.string(),
+  record: z.string(),
 })
 
 /** The default model selection's observable shape. */
@@ -53,6 +60,17 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error('tui-runner: the launcher must provide ctx.appExit before the tree mounts')
   }
   void (async (): Promise<void> => {
+    // Dev tooling: fixture recording mode (see src/recorder.ts).
+    if (config.record !== undefined) {
+      if (config.prompt === undefined || config.prompt.trim() === '') {
+        throw new Error('tui-runner: --record requires a prompt')
+      }
+      await recordFixture(ctx, { outDir: config.record, prompt: config.prompt })
+      process.stdout.write(`dsh-tui: fixture recorded to ${config.record}\n`)
+      exit(0)
+      return
+    }
+
     // Every sibling row settles before the app takes over the process.
     await ctx.get('loader')?.await()
     const selection = ctx.get('agentDefaultModel')?.currentSelection() as ModelSelection | undefined
@@ -62,6 +80,7 @@ export function apply(ctx: Context, config: Config): void {
       `  theme    : ${config.theme ?? 'dark'}`,
       `  resume   : ${config.resume ?? '(fresh session)'}`,
       `  model    : ${config.model ?? '(profile default)'}`,
+      `  cwd      : ${process.cwd()}`,
       `  selection: ${selection === undefined ? '(unavailable)' : `${selection.provider}/${selection.model}${effort === undefined || effort === '' ? '' : ` effort=${effort}`}`}`,
     ]
     process.stdout.write(`${lines.join('\n')}\n`)

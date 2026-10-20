@@ -1,0 +1,11 @@
+{
+  "sessionId": "session-000e649f-5f0d-472d-951a-9ca86db610e4",
+  "prompt": "用中文解释快速排序，并给出 TypeScript 实现",
+  "cwd": "D:\\projects\\dsh-tui",
+  "provider": "deepseek-official",
+  "model": "deepseek-flash",
+  "recordedAt": "2026-10-20T07:22:25.006Z",
+  "eventCount": 16,
+  "frameCount": 17,
+  "statusCount": 2
+}

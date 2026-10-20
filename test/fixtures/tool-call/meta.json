@@ -1,0 +1,11 @@
+{
+  "sessionId": "session-aa2436c4-2fac-4aca-ae05-b8991b121683",
+  "prompt": "列出仓库里的 markdown 文件",
+  "cwd": "D:\\projects\\dsh-tui",
+  "provider": "deepseek-official",
+  "model": "deepseek-flash",
+  "recordedAt": "2026-10-20T07:22:27.526Z",
+  "eventCount": 24,
+  "frameCount": 22,
+  "statusCount": 2
+}
