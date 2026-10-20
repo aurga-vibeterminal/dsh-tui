@@ -1,11 +1,10 @@
 /**
- * dsh-tui runner — Phase 0 walking skeleton.
+ * dsh-tui runner — the app plugin.
  *
- * Boots after the loader settles, prints the resolved startup values and the
- * profile's default model selection, then exits through the launcher. This
- * proves the addon contract end to end (profile boot, row injection, service
- * wiring, peer resolution, `ctx.appExit`); Phase 1 replaces the body with the
- * interactive terminal loop.
+ * Two modes, switched by the startup provider's flags:
+ * - `--record <dir> "<prompt>"` — dev fixture recording (src/recorder.ts).
+ * - interactive fullscreen session (src/app.ts), the product.
+ * Both exit through the launcher's `ctx.appExit`.
  * @module dsh-tui
  */
 
@@ -18,11 +17,12 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { recordFixture } from './recorder.ts'
+import type { DriverModelRoute } from './agent-driver.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-runner'
 
-/** Services required before the skeleton can run. */
+/** Services required before the app can run. */
 export const inject = ['agentDefaultModel']
 
 /** Plugin config: values the bundle patch forwards from the startup service. */
@@ -47,11 +47,10 @@ export const Config: z<Config> = z.object({
   record: z.string(),
 })
 
-/** The default model selection's observable shape. */
-interface ModelSelection {
-  provider: string
-  model: string
-  reasoningEffort?: string | undefined
+/** Split one `provider/model` config string into its route parts. */
+function parseModelRoute(raw: string): DriverModelRoute {
+  const separator = raw.indexOf('/')
+  return { provider: raw.slice(0, separator), model: raw.slice(separator + 1) }
 }
 
 export function apply(ctx: Context, config: Config): void {
@@ -71,20 +70,19 @@ export function apply(ctx: Context, config: Config): void {
       return
     }
 
-    // Every sibling row settles before the app takes over the process.
-    await ctx.get('loader')?.await()
-    const selection = ctx.get('agentDefaultModel')?.currentSelection() as ModelSelection | undefined
-    const effort = selection?.reasoningEffort
-    const lines = [
-      'dsh-tui 0.0.1 (phase 0 skeleton)',
-      `  theme    : ${config.theme ?? 'dark'}`,
-      `  resume   : ${config.resume ?? '(fresh session)'}`,
-      `  model    : ${config.model ?? '(profile default)'}`,
-      `  cwd      : ${process.cwd()}`,
-      `  selection: ${selection === undefined ? '(unavailable)' : `${selection.provider}/${selection.model}${effort === undefined || effort === '' ? '' : ` effort=${effort}`}`}`,
-    ]
-    process.stdout.write(`${lines.join('\n')}\n`)
-    exit(0)
+    // Interactive fullscreen session.
+    if (process.stdin.isTTY !== true) {
+      throw new Error('tui: an interactive terminal is required (stdin is not a TTY)')
+    }
+    const { TuiApp } = await import('./app.ts')
+    const app = await TuiApp.create(ctx, {
+      resume: config.resume,
+      model: config.model === undefined ? undefined : parseModelRoute(config.model),
+      theme: config.theme,
+      prompt: config.prompt,
+    })
+    const result = await app.run(config.prompt)
+    exit(result.exitCode)
   })().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error)
     process.stderr.write(`dsh-tui: ${message}\n`)

@@ -1,0 +1,242 @@
+/**
+ * The interactive application: opencode-style fullscreen layout over the
+ * {@link AgentDriver} and {@link TranscriptModel}.
+ *
+ * ┌──────────────────────────────────────────┐
+ * │ header: project · title · model · status │
+ * ├──────────────────────────────────────────┤
+ * │ transcript ScrollView (follow: end)      │
+ * ├──────────────────────────────────────────┤
+ * │ composer: bordered editor + hints        │
+ * └──────────────────────────────────────────┘
+ *
+ * Keys: Enter sends (queues while running) · Esc/Ctrl+C interrupt · Ctrl+C
+ * twice or Ctrl+Q quits. Exit restores the main screen, prints the transcript
+ * into normal scrollback, flushes the session, and leaves through appExit.
+ * @module dsh-tui/app
+ */
+
+import { basename } from 'node:path'
+import process from 'node:process'
+import type { Context } from '@deepseek-ai/cordis'
+import {
+  Editor,
+  isViewportTUI,
+  Key,
+  matchesKey,
+  ProcessTerminal,
+  ScrollView,
+  TuiAltScreen,
+  VStack,
+  type MarkdownTheme,
+  type SelectListTheme,
+} from '@earendil-works/pi-tui'
+import { createDriver, type AgentDriver, type DriverModelRoute } from './agent-driver.ts'
+import { TranscriptModel } from './events.ts'
+import { TranscriptView, type ItemContext } from './components/transcript.ts'
+import { LineText } from './components/line-text.ts'
+import { themeByName, type Theme } from './theme.ts'
+import { createDebugLogger, StderrCapture, type Logger } from './util/log.ts'
+
+export interface AppOptions {
+  resume: string | undefined
+  model: DriverModelRoute | undefined
+  theme: string | undefined
+  /** Startup prompt sent immediately after boot. */
+  prompt: string | undefined
+}
+
+export interface AppResult {
+  exitCode: number
+}
+
+/** Assembly and lifecycle of the fullscreen session. */
+export class TuiApp {
+  private constructor(
+    readonly driver: AgentDriver,
+    private readonly tui: TuiAltScreen,
+    private readonly stderr: StderrCapture,
+    private readonly header: LineText,
+    private readonly hints: LineText,
+    private readonly editor: Editor,
+    private readonly theme: Theme,
+    private readonly log: Logger,
+    private readonly disposers: Array<() => void>,
+  ) {}
+
+  /**
+   * Build the app: driver first (its subscription feeds the model), then the
+   * layout, then input handling.
+   */
+  static async create(ctx: Context, options: AppOptions): Promise<TuiApp> {
+    const theme = themeByName(options.theme)
+    const log = createDebugLogger()
+    const model = new TranscriptModel()
+    const driver = await createDriver(ctx, model, { resume: options.resume, model: options.model })
+
+    const stderr = new StderrCapture(log)
+    stderr.install()
+
+    const tui = new TuiAltScreen(new ProcessTerminal())
+    const itemContext: ItemContext = { theme, markdownTheme: markdownThemeOf(theme) }
+
+    const header = new LineText('', 1)
+    const transcript = new TranscriptView(model.items, itemContext)
+    const hints = new LineText('', 1)
+    const editor = new Editor(tui, {
+      borderColor: theme.border,
+      selectList: selectListThemeOf(theme),
+    })
+    const composer = new VStack([editor, hints])
+
+    const scroll = new ScrollView(transcript, { follow: 'end', primary: true, overscroll: 'chain' })
+    if (isViewportTUI(tui)) {
+      tui.setLayoutRoot(new VStack([
+        { component: scroll, basis: 0, grow: 1, minSize: 1 },
+        { component: header, basis: 'auto', minSize: 1 },
+        { component: composer, basis: 'auto', shrink: 1, minSize: 1 },
+      ]))
+    }
+    tui.setFocus(editor)
+
+    const app = new TuiApp(driver, tui, stderr, header, hints, editor, theme, log, [])
+    app.wire(model, driver)
+    return app
+  }
+
+  private wire(model: TranscriptModel, driver: AgentDriver): void {
+    const render = (): void => {
+      this.header.setText(headerLine(model, driver))
+      this.hints.setText(hintsLine(driver))
+    }
+    this.disposers.push(model.onChange(() => {
+      render()
+      this.tui.requestRender()
+    }))
+    render()
+  }
+
+  /** Run until the user quits; resolves with the exit code. */
+  async run(initialPrompt: string | undefined): Promise<AppResult> {
+    let settled = false
+    const finish = (code: number): void => {
+      if (settled) return
+      settled = true
+      void this.shutdown(code)
+    }
+
+    // Global keys run before the focused editor.
+    let lastInterrupt = 0
+    this.tui.addInputListener((data) => {
+      if (matchesKey(data, Key.ctrl('q'))) {
+        finish(0)
+        return { consume: true }
+      }
+      if (matchesKey(data, Key.ctrl('c'))) {
+        if (this.driver.running) {
+          this.driver.cancel()
+          return { consume: true }
+        }
+        const now = Date.now()
+        if (now - lastInterrupt < 1500) {
+          finish(0)
+        } else {
+          lastInterrupt = now
+          this.driver.model.pushNotice('· press ctrl+c again to quit')
+        }
+        return { consume: true }
+      }
+      if (matchesKey(data, Key.escape) && this.driver.running) {
+        this.driver.cancel()
+        return { consume: true }
+      }
+      return undefined
+    })
+
+    this.editor.onSubmit = (text: string): void => {
+      const trimmed = text.trim()
+      if (trimmed === '') return
+      if (this.driver.running) this.driver.model.pushNotice(`(queued: ${firstLineOf(trimmed)})`)
+      this.driver.send(trimmed)
+    }
+
+    this.tui.start()
+    if (initialPrompt !== undefined && initialPrompt.trim() !== '') {
+      this.driver.send(initialPrompt)
+    }
+    return new Promise<AppResult>((resolve) => {
+      this.onShutdown = (code) => { resolve({ exitCode: code }) }
+    })
+  }
+
+  private onShutdown: ((code: number) => void) | undefined
+
+  private async shutdown(code: number): Promise<void> {
+    for (const dispose of this.disposers) dispose()
+    this.driver.stop()
+    this.tui.stop()
+    const pending = this.stderr.restore()
+    if (pending !== '') process.stderr.write(pending)
+    try {
+      await this.driver.flush()
+    } catch (error: unknown) {
+      this.log.debug(`flush failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    this.onShutdown?.(code)
+  }
+}
+
+function firstLineOf(text: string): string {
+  const line = text.split('\n').find(candidate => candidate.trim() !== '') ?? ''
+  return line.length > 48 ? `${line.slice(0, 47)}…` : line
+}
+
+function headerLine(model: TranscriptModel, driver: AgentDriver): string {
+  const theme = themeByName(undefined)
+  const project = basename(process.cwd())
+  const title = model.title === undefined ? 'new session' : truncate(model.title, 28)
+  const tokens = `${model.inputTokens + model.outputTokens} tok`
+  const status = driver.running ? 'running' : 'idle'
+  return theme.dim(`${project} · ${title} · ${status} · ${tokens}`)
+}
+
+function hintsLine(driver: AgentDriver): string {
+  const theme = themeByName(undefined)
+  return theme.dim(driver.running
+    ? 'enter queue · esc interrupt · ctrl+q quit'
+    : 'enter send · shift+enter newline · ctrl+q quit')
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+function markdownThemeOf(theme: Theme): MarkdownTheme {
+  const identity = (text: string): string => text
+  return {
+    heading: theme.accent,
+    link: theme.accent,
+    linkUrl: theme.dim,
+    code: theme.tool,
+    codeBlock: identity,
+    codeBlockBorder: theme.dim,
+    quote: theme.dim,
+    quoteBorder: theme.dim,
+    hr: theme.dim,
+    listBullet: theme.accent,
+    bold: (text) => `\x1b[1m${text}\x1b[22m`,
+    italic: (text) => `\x1b[3m${text}\x1b[23m`,
+    strikethrough: theme.dim,
+    underline: (text) => `\x1b[4m${text}\x1b[24m`,
+  }
+}
+
+function selectListThemeOf(theme: Theme): SelectListTheme {
+  return {
+    selectedPrefix: theme.accent,
+    selectedText: (text: string) => text,
+    description: theme.dim,
+    scrollInfo: theme.dim,
+    noMatch: theme.dim,
+  }
+}
