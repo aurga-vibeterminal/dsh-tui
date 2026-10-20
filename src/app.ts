@@ -28,14 +28,12 @@ import {
   ScrollView,
   TuiAltScreen,
   VStack,
-  type MarkdownTheme,
-  type SelectListTheme,
 } from '@earendil-works/pi-tui'
 import { createDriver, type AgentDriver, type DriverModelRoute } from './agent-driver.ts'
 import { TranscriptModel } from './events.ts'
 import { TranscriptView, type ItemContext } from './components/transcript.ts'
 import { LineText } from './components/line-text.ts'
-import { themeByName, type Theme } from './theme.ts'
+import { markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
 import { createDebugLogger, StderrCapture, type Logger } from './util/log.ts'
 
 export interface AppOptions {
@@ -56,6 +54,7 @@ export class TuiApp {
     readonly driver: AgentDriver,
     private readonly tui: TuiAltScreen,
     private readonly stderr: StderrCapture,
+    private readonly transcript: TranscriptView,
     private readonly header: LineText,
     private readonly hints: LineText,
     private readonly editor: Editor,
@@ -78,14 +77,14 @@ export class TuiApp {
     stderr.install()
 
     const tui = new TuiAltScreen(new ProcessTerminal())
-    const itemContext: ItemContext = { theme, markdownTheme: markdownThemeOf(theme) }
+    const itemContext: ItemContext = { theme, markdownTheme: markdownThemeFor(theme) }
 
     const header = new LineText('', 1)
     const transcript = new TranscriptView(model.items, itemContext)
     const hints = new LineText('', 1)
     const editor = new Editor(tui, {
       borderColor: theme.border,
-      selectList: selectListThemeOf(theme),
+      selectList: selectListThemeFor(theme),
     })
     const composer = new VStack([editor, hints])
 
@@ -99,7 +98,7 @@ export class TuiApp {
     }
     tui.setFocus(editor)
 
-    const app = new TuiApp(driver, tui, stderr, header, hints, editor, theme, log, [])
+    const app = new TuiApp(driver, tui, stderr, transcript, header, hints, editor, theme, log, [])
     app.wire(model, driver)
     return app
   }
@@ -110,6 +109,9 @@ export class TuiApp {
       this.hints.setText(hintsLine(driver))
     }
     this.disposers.push(model.onChange(() => {
+      // The transcript's cached lines are stale the moment the model moved;
+      // without this invalidate the viewport never shows new items.
+      this.transcript.invalidate()
       render()
       this.tui.requestRender()
     }))
@@ -209,34 +211,4 @@ function hintsLine(driver: AgentDriver): string {
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
-}
-
-function markdownThemeOf(theme: Theme): MarkdownTheme {
-  const identity = (text: string): string => text
-  return {
-    heading: theme.accent,
-    link: theme.accent,
-    linkUrl: theme.dim,
-    code: theme.tool,
-    codeBlock: identity,
-    codeBlockBorder: theme.dim,
-    quote: theme.dim,
-    quoteBorder: theme.dim,
-    hr: theme.dim,
-    listBullet: theme.accent,
-    bold: (text) => `\x1b[1m${text}\x1b[22m`,
-    italic: (text) => `\x1b[3m${text}\x1b[23m`,
-    strikethrough: theme.dim,
-    underline: (text) => `\x1b[4m${text}\x1b[24m`,
-  }
-}
-
-function selectListThemeOf(theme: Theme): SelectListTheme {
-  return {
-    selectedPrefix: theme.accent,
-    selectedText: (text: string) => text,
-    description: theme.dim,
-    scrollInfo: theme.dim,
-    noMatch: theme.dim,
-  }
 }

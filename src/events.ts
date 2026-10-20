@@ -261,10 +261,14 @@ export class TranscriptModel {
       }
       case 'turn/end': {
         if (event.data.reason.kind !== 'completed') {
+          const detail = event.data.reason.kind === 'error'
+            ? `: ${(event.data.reason as { error: { message: string } }).error.message}`
+            : ''
+          const text = `· turn ${event.data.reason.kind}${detail}`
           this.items.push({
             kind: 'notice',
             id: localId('turn'),
-            text: `· turn ${event.data.reason.kind}`,
+            text: text.length > 200 ? `${text.slice(0, 199)}…` : text,
             tone: event.data.reason.kind === 'error' ? 'error' : 'dim',
           })
         }

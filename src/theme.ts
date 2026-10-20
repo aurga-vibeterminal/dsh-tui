@@ -35,3 +35,37 @@ export function themeByName(name: string | undefined): Theme {
   // Light and custom themes land with the Phase 3 theme system.
   return darkTheme
 }
+
+import type { MarkdownTheme, SelectListTheme } from '@earendil-works/pi-tui'
+
+/** pi-tui Markdown theme derived from one semantic theme. */
+export function markdownThemeFor(theme: Theme): MarkdownTheme {
+  const identity = (text: string): string => text
+  return {
+    heading: theme.accent,
+    link: theme.accent,
+    linkUrl: theme.dim,
+    code: theme.tool,
+    codeBlock: identity,
+    codeBlockBorder: theme.dim,
+    quote: theme.dim,
+    quoteBorder: theme.dim,
+    hr: theme.dim,
+    listBullet: theme.accent,
+    bold: (text) => `\x1b[1m${text}\x1b[22m`,
+    italic: (text) => `\x1b[3m${text}\x1b[23m`,
+    strikethrough: theme.dim,
+    underline: (text) => `\x1b[4m${text}\x1b[24m`,
+  }
+}
+
+/** pi-tui SelectList theme derived from one semantic theme. */
+export function selectListThemeFor(theme: Theme): SelectListTheme {
+  return {
+    selectedPrefix: theme.accent,
+    selectedText: (text: string) => text,
+    description: theme.dim,
+    scrollInfo: theme.dim,
+    noMatch: theme.dim,
+  }
+}

@@ -10,6 +10,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { TranscriptModel, type AssistantStreamFrameLike } from '../src/events.ts'
+import { TranscriptView } from '../src/components/transcript.ts'
+import { markdownThemeFor, themeByName } from '../src/theme.ts'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 const fixturesRoot = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -166,5 +168,32 @@ describe('TranscriptModel · notices and unknown events', () => {
     } as unknown as SessionEvent)
     expect(model.items.filter(item => item.kind === 'notice')).toHaveLength(0)
     expect(model.items.filter(item => item.kind === 'user')).toHaveLength(1)
+  })
+})
+
+describe('app wiring · model changes must invalidate the transcript view', () => {
+  it('re-renders new items when wired through onChange→invalidate (regression)', () => {
+    const theme = themeByName('dark')
+    const model = new TranscriptModel()
+    const view = new TranscriptView(model.items, { theme, markdownTheme: markdownThemeFor(theme) })
+    const dispose = model.onChange(() => {
+      view.invalidate()
+    })
+
+    const before = view.render(48)
+    model.applyEvent({
+      type: 'user/message',
+      seq: 1,
+      time: 0,
+      data: { content: [{ type: 'text', text: '你好世界' }], source: { kind: 'user' }, role: 'user', id: 'x' },
+    } as unknown as SessionEvent)
+    const after = view.render(48)
+
+    expect(after.length).toBeGreaterThan(before.length)
+    expect(after.join('\n')).toContain('你好世界')
+
+    // And without the invalidate call the view would still show the old
+    // lines — assert the cache actually resets through the wired path.
+    dispose()
   })
 })

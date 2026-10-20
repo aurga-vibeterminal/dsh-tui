@@ -109,6 +109,12 @@ export async function createDriver(
   const stopStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
     if (subject === agent) running = status === 'running'
   })
+  const stopErrors = ctx.on('agent/error', ({ agent: subject, error }) => {
+    if (subject === agent) {
+      const message = error instanceof Error ? error.message : String(error)
+      model.pushNotice(`· error: ${message.slice(0, 180)}`, 'error')
+    }
+  })
   const stopEvents = ctx.on('session/event', (session, event) => {
     if (session === agent.session) model.applyEvent(event)
   })
@@ -135,6 +141,7 @@ export async function createDriver(
       stopEvents()
       stopStream()
       stopStatus()
+      stopErrors()
     },
     async flush(): Promise<void> {
       await sessions.flush(agent.session)
