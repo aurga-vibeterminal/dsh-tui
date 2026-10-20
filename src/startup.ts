@@ -1,0 +1,137 @@
+/**
+ * dsh-tui startup provider: parses this app's flag family from the launcher's
+ * immutable argument snapshot and publishes the {@link TUI_STARTUP_SERVICE}
+ * the runner row injects. Modeled on `@deepseek-ai/dsh-headless/startup`.
+ * @module dsh-tui/startup
+ */
+
+import { Command } from 'commander'
+import type { Context } from '@deepseek-ai/cordis'
+import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
+
+/** Stable Cordis plugin name. */
+export const name = 'tui-startup'
+
+/** Services required before the flags can be parsed. */
+export const inject = ['cmdlineArgs']
+
+/** Service provided by this plugin and injected by the TUI runner row. */
+export const TUI_STARTUP_SERVICE = 'tuiStartup'
+
+/** One `--model` value split into its route parts. */
+export interface TuiModelRoute {
+  /** LLM provider id, for example `deepseek-official`. */
+  provider: string
+  /** Model id within the provider, for example `deepseek-flash`. */
+  model: string
+}
+
+/** What the runner row reads from {@link TUI_STARTUP_SERVICE}. */
+export interface TuiStartupValues {
+  /** Exact persisted Session identity to resume; absent for a fresh session. */
+  resume: string | undefined
+  /** Explicit model route; absent keeps the profile's default selection. */
+  model: TuiModelRoute | undefined
+  /** Adapter-owned reasoning-effort id; absent keeps the model default. */
+  reasoningEffort: string | undefined
+  /** UI theme name; absent keeps the runner default. */
+  theme: string | undefined
+}
+
+/** Commander option shape of this app's program. */
+interface TuiOptions {
+  resume?: string | undefined
+  model?: string | undefined
+  reasoningEffort?: string | undefined
+  theme?: string | undefined
+}
+
+/**
+ * This app's command: its flags and help text. Fresh per call, so one process
+ * can parse more than once (tests).
+ * @returns the commander program without an action.
+ */
+export function tuiCommand(): Command {
+  return new Command()
+    .name('dsh --profile tui')
+    .description('Interactive terminal UI for a DeepSeek Harness agent.')
+    .helpOption('-h, --help', 'show this help')
+    .option('--resume <id>', 'resume the persisted Session with this id; an unknown id is an error')
+    .option('--model <provider/model>', 'explicit model route; overrides the profile default')
+    .option('--reasoning-effort <id>', 'adapter-owned reasoning effort for the selected route')
+    .option('--theme <name>', 'UI theme name (default: dark)')
+    .addHelpText('after', `
+Examples:
+  dsh --profile tui                                    start a fresh session
+  dsh --profile tui --resume session-…                 continue a stored session
+  dsh --profile tui --model deepseek-official/deepseek-flash
+`)
+}
+
+/**
+ * Validate and normalize parsed options into startup values.
+ * @param options - commander's parsed option set.
+ * @param error - rejects the invocation (commander control-flow error).
+ * @returns the values the runner consumes.
+ */
+function valuesFromOptions(options: TuiOptions, error: (message: string) => never): TuiStartupValues {
+  const resume = options.resume
+  if (resume !== undefined && resume.trim() === '') {
+    error('--resume requires a non-empty session id')
+  }
+  let model: TuiModelRoute | undefined
+  if (options.model !== undefined) {
+    const separator = options.model.indexOf('/')
+    const provider = separator <= 0 ? '' : options.model.slice(0, separator).trim()
+    const modelId = separator < 0 ? '' : options.model.slice(separator + 1).trim()
+    if (provider === '' || modelId === '') {
+      error(`--model expects <provider>/<model>, received ${JSON.stringify(options.model)}`)
+    }
+    model = { provider, model: modelId }
+  }
+  const reasoningEffort = options.reasoningEffort
+  if (reasoningEffort !== undefined && reasoningEffort.trim() === '') {
+    error('--reasoning-effort requires a non-empty id')
+  }
+  const theme = options.theme
+  if (theme !== undefined && theme.trim() === '') {
+    error('--theme requires a non-empty name')
+  }
+  return { resume, model, reasoningEffort, theme }
+}
+
+/**
+ * Parse and provide the startup values as an ordinary Cordis service. The
+ * command's action publishes the values; help and rejections owe the process
+ * an exit, which `parseCmdline` requests from the launcher.
+ * @param ctx - plugin context carrying the command line.
+ */
+export function apply(ctx: Context): void {
+  const program = tuiCommand()
+  program.action(() => {
+    ctx.provide(
+      TUI_STARTUP_SERVICE,
+      valuesFromOptions(program.opts<TuiOptions>(), message => program.error(`error: ${message}`)),
+    )
+  })
+  parseCmdline(ctx, program)
+}
+
+/**
+ * Parse an argument snapshot without a Cordis context (unit tests).
+ * @param argv - raw inner arguments, as `ctx.cmdlineArgs` would return them.
+ * @returns the parsed startup values.
+ * @throws commander's control-flow error on help, version, or a rejection.
+ */
+export function parseTuiArgs(argv: readonly string[]): TuiStartupValues {
+  const program = tuiCommand().exitOverride()
+  let captured: TuiStartupValues | undefined
+  program.action(() => {
+    captured = valuesFromOptions(program.opts<TuiOptions>(), message => program.error(`error: ${message}`))
+  })
+  program.parse([...argv], { from: 'user' })
+  if (captured === undefined) {
+    throw new Error('dsh-tui startup: parse completed without publishing values')
+  }
+  return captured
+}

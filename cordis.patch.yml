@@ -1,0 +1,17 @@
+# dsh-tui — terminal UI bundle for DeepSeek Harness.
+# Two-plugin app pattern (as dsh-headless / dsh-web-app): a startup provider
+# parses the app's flags from the launcher's argument snapshot and provides the
+# tuiStartup service; the runner injects it and owns the terminal.
+- insert:
+    - id: tui-startup
+      name: 'dsh-tui/startup'
+    - id: tui-runner
+      name: 'dsh-tui'
+      inject: [tuiStartup]
+      config:
+        resume: !!js ctx.tuiStartup.resume
+        model: !!js "ctx.tuiStartup.model === undefined ? undefined : ctx.tuiStartup.model.provider + '/' + ctx.tuiStartup.model.model"
+        theme: !!js ctx.tuiStartup.theme ?? 'dark'
+# A full-screen interactive app must never observe a replacement composition.
+- id: hmr
+  disabled: true
