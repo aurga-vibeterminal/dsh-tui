@@ -14,9 +14,11 @@ import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-fs'
-import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, MessageId, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import type { AssistantStreamFrameLike, TranscriptModel } from './events.ts'
 
@@ -61,6 +63,12 @@ export interface AgentDriver {
   setWorkingDirectory(path: string): Promise<string>
   /** Interrupt the running turn, keeping queued input. */
   cancel(): void
+  /** Snapshot pending inbox input. */
+  inbox(): readonly { target: 'next-step' | 'next-turn', id: string, text: string }[]
+  /** Remove one pending inbox message. */
+  removeInboxMessage(id: string): boolean
+  /** Fork the current session; resolves to the child session id. */
+  forkCurrent(): Promise<string>
   /** Stop feeding the model; resolves after subscriptions are dropped. */
   stop(): void
   /** Stop feeding and retire the agent entirely (session switch). */
@@ -162,6 +170,20 @@ export async function createDriver(
   const stopStream = ctx.on('agent/assistant-stream', ({ agent: subject, frame }) => {
     if (subject === agent) safeApply('stream', () => model.applyFrame(frame as AssistantStreamFrameLike))
   })
+  // Subagent lifecycle: this runtime drives exactly our conversation tree, so
+  // every child delegation belongs to it.
+  const stopSubagentStart = ctx.on('subagent/start', (info) => {
+    model.pushNotice(`· subagent started (${info.provider})`)
+  })
+  const stopSubagentEnd = ctx.on('subagent/end', (info) => {
+    const text = info.lastAssistantMessage
+      ?.filter(block => block.type === 'text')
+      .map(block => (block as { text: string }).text)
+      .join('')
+      .trim() ?? ''
+    const preview = text === '' ? '' : `: ${text.slice(0, 100)}`
+    model.pushNotice(`· subagent finished (${String(info.stopReason)})${preview}`)
+  })
 
   return {
     agent,
@@ -209,6 +231,31 @@ export async function createDriver(
       if (service === undefined) throw new Error('tui: workingDirectory service unavailable')
       return await service.set(agent, path)
     },
+    /** Snapshot of pending inbox input (steering first, queued turns after). */
+    inbox(): readonly { target: 'next-step' | 'next-turn', id: string, text: string }[] {
+      const extract = (messages: readonly UserMessage[], target: 'next-step' | 'next-turn') =>
+        messages.map(message => ({
+          target,
+          id: String(message.id),
+          text: message.content
+            .filter(block => block.type === 'text')
+            .map(block => (block.type === 'text' ? block.text : ''))
+            .join(''),
+        }))
+      const inbox = agent.inbox
+      return [...extract(inbox.nextStep, 'next-step'), ...extract(inbox.nextTurn, 'next-turn')]
+    },
+    /** Remove one pending inbox message. */
+    removeInboxMessage(id: string): boolean {
+      return agent.inbox.remove(MessageId(id))
+    },
+    /** Fork the current session and return the child session id. */
+    async forkCurrent(): Promise<string> {
+      const child = ctx.get('sessions')?.fork(agent.session)
+      if (child === undefined) throw new Error('tui: session fork unavailable')
+      await ctx.get('sessions')?.flush(child)
+      return String(child.id)
+    },
     cancel(): void {
       agent.cancel({ kind: 'user' }, { keepInbox: true })
     },
@@ -217,6 +264,8 @@ export async function createDriver(
       stopStream()
       stopStatus()
       stopErrors()
+      stopSubagentStart()
+      stopSubagentEnd()
     },
     /** Stop feeding and retire the agent entirely (session switch). */
     async dispose(): Promise<void> {

@@ -116,6 +116,52 @@ export class TuiApp {
     return app
   }
 
+  /** Overlay picker over pending inbox input; selecting removes the message. */
+  private async pickInboxMessage(): Promise<void> {
+    const pending = this.driver.inbox()
+    if (pending.length === 0) {
+      this.driver.model.pushNotice('· inbox empty')
+      return
+    }
+    const labels = new Map<string, { id: string }>()
+    const options = pending.map(entry => {
+      const label = `[${entry.target}] ${truncate(entry.text === '' ? '(no text)' : entry.text, 44)}`
+      labels.set(label, { id: entry.id })
+      return { label }
+    })
+    const dialog = new QuestionDialog({
+      questions: [{ id: 'inbox', question: 'Remove pending input', options }],
+    }, this.theme)
+    const answer = await this.showDialog(dialog)
+    const selected = answer.answers[0]?.selected[0]
+    if (selected === undefined) {
+      this.driver.model.pushNotice('· inbox picker cancelled')
+      return
+    }
+    const target = labels.get(selected)
+    if (target === undefined) return
+    this.driver.model.pushNotice(this.driver.removeInboxMessage(target.id)
+      ? `· removed ${truncate(selected, 60)}`
+      : `· remove failed (already claimed?)`)
+  }
+
+  /** Fork the current session and switch the driver onto the child. */
+  private async forkSession(): Promise<void> {
+    if (this.driver.running) {
+      this.driver.model.pushNotice('· interrupt the running turn first (esc)')
+      return
+    }
+    let childId: string
+    try {
+      childId = await this.driver.forkCurrent()
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.driver.model.pushNotice(`· fork failed: ${message.slice(0, 140)}`, 'error')
+      return
+    }
+    await this.switchSession(childId)
+  }
+
   /** Overlay picker over the llm catalog; applies the switch to the next step. */
   private async pickModel(): Promise<void> {
     const llm = this.ctx.get('llm')
@@ -367,6 +413,8 @@ export class TuiApp {
         { name: 'events', description: 'inspect raw session events' },
         { name: 'model', description: 'switch provider/model/effort' },
         { name: 'cwd', description: 'show or change the working directory' },
+        { name: 'inbox', description: 'view and remove queued or steering input' },
+        { name: 'fork', description: 'fork the current session and switch to it' },
       ]
       this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(items, process.cwd()))
     } catch (error: unknown) {
@@ -399,6 +447,14 @@ export class TuiApp {
     }
     if (line === '/model' || line === '/models') {
       await this.pickModel()
+      return true
+    }
+    if (line === '/inbox') {
+      await this.pickInboxMessage()
+      return true
+    }
+    if (line === '/fork') {
+      await this.forkSession()
       return true
     }
     if (line === '/cwd' || line.startsWith('/cwd ')) {
