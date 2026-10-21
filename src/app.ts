@@ -41,6 +41,7 @@ import { StatusLine } from './components/status-line.ts'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import { markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
 import { createDebugLogger, StderrCapture, type Logger } from './util/log.ts'
+import packageInfo from '../package.json'
 
 export interface AppOptions {
   resume: string | undefined
@@ -111,6 +112,7 @@ export class TuiApp {
     app.wire(model)
     app.wireInteractions(ctx)
     app.wireCommands()
+    pushWelcome(model, driver)
     return app
   }
 
@@ -716,6 +718,14 @@ interface SessionQueryLike {
     live: boolean
   }[]>
   readTitleSnapshots(ids: readonly string[], signal?: AbortSignal): Promise<readonly unknown[]>
+}
+
+/** Startup banner: version, current route, developer contact, first hints. */
+function pushWelcome(model: TranscriptModel, driver: AgentDriver): void {
+  const version: string = packageInfo.version
+  model.pushNotice(`dsh-tui v${version} · opencode-style console for DeepSeek Harness`)
+  model.pushNotice(`model ${driver.route.provider}/${driver.route.model} · type / for commands · ctrl+q quit`)
+  model.pushNotice('development & feedback: dev@vterminal.dev')
 }
 
 /** Compact relative time for the session picker. */

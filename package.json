@@ -1,6 +1,6 @@
 {
   "name": "dsh-tui",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Terminal UI bundle (addon) for DeepSeek Harness: opencode-style fullscreen agent console",
   "type": "module",
   "license": "MIT",
