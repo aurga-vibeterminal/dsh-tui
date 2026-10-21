@@ -1,8 +1,8 @@
 # dsh-tui
 
-A terminal UI **addon** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): a scrollback-native, pi-style agent console running in-process as a dsh plugin bundle.
+A terminal UI **addon** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): an opencode-style fullscreen agent console running in-process as a dsh plugin bundle.
 
-**Status: Phase 0 skeleton.** See [docs/PLAN.md](docs/PLAN.md) for the roadmap.
+**Status: v0.1.0 — Phases 1–3 complete.** See [docs/PLAN.md](docs/PLAN.md) for the roadmap and [docs/GUIDE.md](docs/GUIDE.md) for the user guide (keys, commands, `@` file search, todos, permissions, themes, export).
 
 ## Install (into a `tui` profile)
 
