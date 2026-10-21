@@ -500,6 +500,7 @@ export class TuiApp {
   private onShutdown: ((code: number) => void) | undefined
 
   private async shutdown(code: number): Promise<void> {
+    this.log.debug(`shutdown: begin (code ${String(code)})`)
     const step = (label: string, action: () => void | Promise<void>): Promise<void> => {
       return Promise.resolve()
         .then(action)
@@ -510,6 +511,18 @@ export class TuiApp {
           this.log.debug(`shutdown ${label} failed: ${error instanceof Error ? error.message : String(error)}`)
         })
     }
+
+    // Signal shield: the moment tui.stop() restores cooked mode, any further
+    // Ctrl+C becomes a real console interrupt — it hits the parent shell and
+    // drives the launcher's interrupt() into an immediate exit(130)
+    // mid-teardown (killing the terminal window). The process is already
+    // leaving through appExit; swallow stray signals for the remainder.
+    await step('shield-signals', () => {
+      process.removeAllListeners('SIGINT')
+      process.removeAllListeners('SIGTERM')
+      process.on('SIGINT', () => { this.log.debug('sigint shielded during teardown') })
+      process.on('SIGTERM', () => { this.log.debug('sigterm shielded during teardown') })
+    })
 
     for (const dispose of this.disposers) dispose()
     this.disposers.length = 0
@@ -536,6 +549,7 @@ export class TuiApp {
         }),
       ])
     })
+    this.log.debug('shutdown: complete')
     this.onShutdown?.(code)
   }
 }
