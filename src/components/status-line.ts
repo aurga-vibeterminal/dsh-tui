@@ -1,0 +1,72 @@
+/**
+ * The animated status segment of the header bar: shows a braille spinner
+ * frame while the agent runs, plain text otherwise. Owns its frame timer and
+ * asks the host for re-renders on each tick.
+ * @module dsh-tui/components/status-line
+ */
+
+import { truncateToWidth, type Component } from '@earendil-works/pi-tui'
+
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
+
+export class StatusLine implements Component {
+  private text = ''
+  private active = false
+  private frame = 0
+  private timer: ReturnType<typeof setInterval> | undefined
+  private cacheWidth: number | undefined
+  private cacheLine: string[] | undefined
+
+  constructor(
+    private readonly requestRender: () => void,
+    private readonly intervalMs = 120,
+    private readonly frames: readonly string[] = SPINNER_FRAMES,
+  ) {}
+
+  /** Update the static text and the running state together. */
+  set(text: string, active: boolean): void {
+    const textChanged = text !== this.text
+    const stateChanged = active !== this.active
+    if (!textChanged && !stateChanged) return
+    this.text = text
+    this.active = active
+    this.cacheWidth = undefined
+    this.cacheLine = undefined
+    this.syncTimer()
+    if (stateChanged) this.requestRender()
+  }
+
+  dispose(): void {
+    this.active = false
+    this.syncTimer()
+    this.cacheWidth = undefined
+    this.cacheLine = undefined
+  }
+
+  invalidate(): void {
+    this.cacheWidth = undefined
+    this.cacheLine = undefined
+  }
+
+  render(width: number): string[] {
+    if (this.cacheLine !== undefined && this.cacheWidth === width) return this.cacheLine
+    const head = this.active ? `${this.frames[this.frame % this.frames.length] ?? '·'} ` : ''
+    this.cacheWidth = width
+    this.cacheLine = [truncateToWidth(`${head}${this.text}`, width)]
+    return this.cacheLine
+  }
+
+  private syncTimer(): void {
+    if (this.active && this.timer === undefined) {
+      this.timer = setInterval(() => {
+        this.frame = (this.frame + 1) % this.frames.length
+        this.cacheWidth = undefined
+        this.cacheLine = undefined
+        this.requestRender()
+      }, this.intervalMs)
+    } else if (!this.active && this.timer !== undefined) {
+      clearInterval(this.timer)
+      this.timer = undefined
+    }
+  }
+}

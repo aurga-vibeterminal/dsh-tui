@@ -47,6 +47,15 @@ export type TranscriptItem =
   | { kind: 'tool'; id: string; callId: string; live: boolean; name: string; argDigest: string; status: ToolStatus; resultDigest: string | undefined }
   | { kind: 'notice'; id: string; text: string; tone: 'dim' | 'error' }
 
+/** One raw event kept for the /events inspector. */
+export interface RecentEventRecord {
+  readonly seq: number
+  readonly type: string
+  readonly summary: string
+}
+
+const RECENT_EVENT_LIMIT = 300
+
 /** Aggregate status the header bar renders. */
 export interface TranscriptStatus {
   title: string | undefined
@@ -79,6 +88,8 @@ export class TranscriptModel {
   private idCounter = 0
 
   readonly items: TranscriptItem[] = []
+  /** Ring buffer of raw durable events for the /events inspector. */
+  readonly recent: RecentEventRecord[] = []
   title: string | undefined
   /** Current permission preset name, from `permission/preset` events. */
   preset: string | undefined
@@ -186,6 +197,7 @@ export class TranscriptModel {
   }
 
   applyEvent(event: SessionEvent): void {
+    this.remember(event)
     // Plugin-contributed event types (session/title, persistence delivery,
     // ...) are not in the base SessionEventMap; narrow them structurally.
     const type: string = event.type
@@ -325,8 +337,20 @@ export class TranscriptModel {
     this.changed()
   }
 
-  private upsertLiveTool(callId: string, name: string | undefined, argsDelta: string): void {
-    const existing = this.items.find(item => item.kind === 'tool' && item.live && item.callId === callId)
+  /** Keep one raw event for the inspector, bounded. */
+  private remember(event: SessionEvent): void {
+    let summary: string
+    try {
+      summary = JSON.stringify(event.data) ?? ''
+    } catch {
+      summary = '(unserializable)'
+    }
+    if (summary.length > 240) summary = `${summary.slice(0, 239)}…`
+    this.recent.push({ seq: Number(event.seq), type: event.type, summary })
+    if (this.recent.length > RECENT_EVENT_LIMIT) this.recent.splice(0, this.recent.length - RECENT_EVENT_LIMIT)
+  }
+
+  private upsertLiveTool(callId: string, name: string | undefined, argsDelta: string): void {    const existing = this.items.find(item => item.kind === 'tool' && item.live && item.callId === callId)
     if (existing !== undefined && existing.kind === 'tool') {
       existing.argDigest = digestToolArgs(existing.name, rawArgsAppend(existing.argDigest, argsDelta))
       return

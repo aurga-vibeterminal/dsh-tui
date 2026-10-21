@@ -36,7 +36,8 @@ import { createDriver, type AgentDriver, type DriverModelRoute } from './agent-d
 import { TranscriptModel } from './events.ts'
 import { TranscriptView, type ItemContext } from './components/transcript.ts'
 import { LineText } from './components/line-text.ts'
-import { ApprovalDialog, QuestionDialog } from './dialogs.ts'
+import { ApprovalDialog, EventsDialog, QuestionDialog } from './dialogs.ts'
+import { StatusLine } from './components/status-line.ts'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import { markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
 import { createDebugLogger, StderrCapture, type Logger } from './util/log.ts'
@@ -61,7 +62,7 @@ export class TuiApp {
     private readonly tui: TuiAltScreen,
     private readonly stderr: StderrCapture,
     private readonly transcript: TranscriptView,
-    private readonly header: LineText,
+    private readonly header: StatusLine,
     private readonly hints: LineText,
     private readonly editor: Editor,
     private readonly theme: Theme,
@@ -85,7 +86,9 @@ export class TuiApp {
     const tui = new TuiAltScreen(new ProcessTerminal())
     const itemContext: ItemContext = { theme, markdownTheme: markdownThemeFor(theme) }
 
-    const header = new LineText('', 1)
+    const header = new StatusLine(() => {
+      tui.requestRender()
+    })
     const transcript = new TranscriptView(model.items, itemContext)
     const hints = new LineText('', 1)
     const editor = new Editor(tui, {
@@ -262,6 +265,7 @@ export class TuiApp {
         { name: 'exit', description: 'quit the TUI' },
         { name: 'clear', description: 'clear the transcript view' },
         { name: 'session', description: 'list stored sessions and switch to one' },
+        { name: 'events', description: 'inspect raw session events' },
       ]
       this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(items, process.cwd()))
     } catch (error: unknown) {
@@ -285,6 +289,11 @@ export class TuiApp {
     }
     if (line === '/session' || line === '/sessions') {
       await this.pickSession()
+      return true
+    }
+    if (line === '/events') {
+      const dialog = new EventsDialog(this.driver.model.recent, this.theme)
+      await this.showDialog(dialog)
       return true
     }
     if (commands === undefined) {
@@ -375,7 +384,7 @@ export class TuiApp {
 
   private wire(model: TranscriptModel): void {
     const render = (): void => {
-      this.header.setText(headerLine(model, this.driver))
+      this.header.set(headerLine(model), this.driver.running)
       this.hints.setText(hintsLine(this.driver))
     }
     // Exceptions inside event listeners and render callbacks would take down
@@ -504,6 +513,7 @@ export class TuiApp {
 
     for (const dispose of this.disposers) dispose()
     this.disposers.length = 0
+    await step('stop-spinner', () => { this.header.dispose() })
     await step('stop-driver', () => { this.driver.stop() })
 
     // pi-tui 1.3.0's stop() document print-back is defective with layout
@@ -535,14 +545,13 @@ function firstLineOf(text: string): string {
   return line.length > 48 ? `${line.slice(0, 47)}…` : line
 }
 
-function headerLine(model: TranscriptModel, driver: AgentDriver): string {
+function headerLine(model: TranscriptModel): string {
   const theme = themeByName(undefined)
   const project = basename(process.cwd())
   const title = model.title === undefined ? 'new session' : truncate(model.title, 24)
   const preset = model.preset === undefined ? '' : ` · ${model.preset}`
   const tokens = `${model.inputTokens + model.outputTokens} tok`
-  const status = driver.running ? 'running' : 'idle'
-  return theme.dim(`${project} · ${title}${preset} · ${status} · ${tokens}`)
+  return theme.dim(` ${project} · ${title}${preset} · ${tokens}`)
 }
 
 function hintsLine(driver: AgentDriver): string {

@@ -235,3 +235,49 @@ export function padLine(line: string, width: number): string {
   const visible = visibleWidth(line)
   return visible >= width ? line : line + ' '.repeat(width - visible)
 }
+
+/** Read-only raw-event inspector shown by the /events command. */
+export class EventsDialog implements Component {
+  private cacheWidth: number | undefined
+  private cacheLines: string[] | undefined
+  private settled = false
+
+  readonly done: Promise<void>
+  private resolveDone!: () => void
+
+  constructor(
+    private readonly records: readonly { seq: number, type: string, summary: string }[],
+    private readonly theme: Theme,
+    private readonly maxLines = 24,
+  ) {
+    this.done = new Promise<void>((resolve) => {
+      this.resolveDone = resolve
+    })
+  }
+
+  invalidate(): void {
+    this.cacheWidth = undefined
+    this.cacheLines = undefined
+  }
+
+  render(width: number): string[] {
+    if (this.cacheLines !== undefined && this.cacheWidth === width) return this.cacheLines
+    const lines = [truncateToWidth(this.theme.accent(` raw events (last ${String(Math.min(this.maxLines, this.records.length))} of ${String(this.records.length)})`), width)]
+    const start = Math.max(0, this.records.length - this.maxLines)
+    for (const record of this.records.slice(start)) {
+      lines.push(truncateToWidth(this.theme.dim(` ${String(record.seq).padStart(4, ' ')} ${record.type} ${record.summary}`), width))
+    }
+    lines.push(truncateToWidth(this.theme.dim(' esc close'), width))
+    this.cacheWidth = width
+    this.cacheLines = lines
+    return lines
+  }
+
+  handleInput(data: string): void {
+    if (this.settled) return
+    if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter) || data === 'q') {
+      this.settled = true
+      this.resolveDone()
+    }
+  }
+}
