@@ -236,6 +236,49 @@ export function padLine(line: string, width: number): string {
   return visible >= width ? line : line + ' '.repeat(width - visible)
 }
 
+/** Generic read-only list overlay (todos, exports, static info). */
+export class ListDialog implements Component {
+  private cacheWidth: number | undefined
+  private cacheLines: string[] | undefined
+  private settled = false
+
+  readonly done: Promise<void>
+  private resolveDone!: () => void
+
+  constructor(
+    private readonly title: string,
+    private readonly rows: readonly string[],
+    private readonly theme: Theme,
+  ) {
+    this.done = new Promise<void>((resolve) => {
+      this.resolveDone = resolve
+    })
+  }
+
+  invalidate(): void {
+    this.cacheWidth = undefined
+    this.cacheLines = undefined
+  }
+
+  render(width: number): string[] {
+    if (this.cacheLines !== undefined && this.cacheWidth === width) return this.cacheLines
+    const lines = [truncateToWidth(this.theme.accent(` ${this.title}`), width)]
+    for (const row of this.rows) lines.push(truncateToWidth(row, width))
+    lines.push(truncateToWidth(this.theme.dim(' esc close'), width))
+    this.cacheWidth = width
+    this.cacheLines = lines
+    return lines
+  }
+
+  handleInput(data: string): void {
+    if (this.settled) return
+    if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter) || data === 'q') {
+      this.settled = true
+      this.resolveDone()
+    }
+  }
+}
+
 /** Read-only raw-event inspector shown by the /events command. */
 export class EventsDialog implements Component {
   private cacheWidth: number | undefined

@@ -189,6 +189,24 @@ describe('TranscriptModel · notices and unknown events', () => {
     expect(model.items.some(item => item.kind === 'notice' && item.text.includes('cwd → D:\\other'))).toBe(true)
   })
 
+  it('tracks todos from todo/write events', () => {
+    const model = new TranscriptModel()
+    model.applyEvent({
+      type: 'todo/write', seq: 1, time: 0,
+      data: { todos: [
+        { content: 'first', status: 'completed' },
+        { content: 'second', status: 'in_progress' },
+      ] },
+    } as unknown as SessionEvent)
+    expect(model.todos).toEqual([
+      { content: 'first', status: 'completed' },
+      { content: 'second', status: 'in_progress' },
+    ])
+    expect(model.items.some(item => item.kind === 'notice' && item.text.includes('todos 1/2'))).toBe(true)
+    model.reset()
+    expect(model.todos).toBeUndefined()
+  })
+
   it('resets in place for a session switch (array identity preserved)', () => {
     const model = new TranscriptModel()
     model.applyEvent({

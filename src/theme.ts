@@ -31,10 +31,23 @@ export const darkTheme: Theme = {
   border: wrap('\x1b[90m', '\x1b[39m'),
 }
 
+export const lightTheme: Theme = {
+  dim: wrap('\x1b[2m', '\x1b[22m'),
+  accent: wrap('\x1b[36m', '\x1b[39m'),
+  user: wrap('\x1b[36m', '\x1b[39m'),
+  tool: wrap('\x1b[94m', '\x1b[39m'),
+  success: wrap('\x1b[32m', '\x1b[39m'),
+  warning: wrap('\x1b[33m', '\x1b[39m'),
+  error: wrap('\x1b[31m', '\x1b[39m'),
+  border: wrap('\x1b[37m', '\x1b[39m'),
+}
+
 export function themeByName(name: string | undefined): Theme {
-  // Light and custom themes land with the Phase 3 theme system.
+  if (name === 'light') return lightTheme
   return darkTheme
 }
+
+export const THEME_NAMES = ['dark', 'light'] as const
 
 import type { MarkdownTheme, SelectListTheme } from '@earendil-works/pi-tui'
 

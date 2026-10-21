@@ -111,6 +111,8 @@ export class TranscriptModel {
   preset: string | undefined
   /** Current model route, from `model/selection` events. */
   model: string | undefined
+  /** Latest todo list, from `todo/write` events. */
+  todos: { content: string, status: string }[] | undefined
   inputTokens = 0
   outputTokens = 0
 
@@ -129,6 +131,8 @@ export class TranscriptModel {
     this.queuedNotices = []
     this.title = undefined
     this.preset = undefined
+    this.model = undefined
+    this.todos = undefined
     this.inputTokens = 0
     this.outputTokens = 0
     this.changed()
@@ -280,6 +284,23 @@ export class TranscriptModel {
       const cwd = (event as unknown as { data: { cwd?: string } }).data.cwd
       if (typeof cwd === 'string' && cwd !== '') {
         this.items.push({ kind: 'notice', id: localId('cwd'), text: `· cwd → ${cwd}`, tone: 'dim' })
+        this.changed()
+      }
+      return
+    }
+    if (type === 'todo/write') {
+      const todos = (event as unknown as { data: { todos?: { content?: unknown, status?: unknown }[] } }).data.todos
+      if (Array.isArray(todos)) {
+        this.todos = todos
+          .filter(entry => typeof entry?.content === 'string')
+          .map(entry => ({ content: entry.content as string, status: typeof entry.status === 'string' ? entry.status : 'pending' }))
+        const done = this.todos.filter(entry => entry.status === 'completed').length
+        this.items.push({
+          kind: 'notice',
+          id: localId('todo'),
+          text: `· todos ${String(done)}/${String(this.todos.length)} done (/todo)`,
+          tone: 'dim',
+        })
         this.changed()
       }
       return

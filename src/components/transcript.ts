@@ -32,15 +32,25 @@ export class TranscriptView implements Component {
   private readonly entries: Entry[] = []
   private cacheWidth: number | undefined
   private cacheLines: string[] | undefined
+  private context: ItemContext
 
   constructor(
     private readonly items: readonly TranscriptItem[],
-    private readonly context: ItemContext,
-  ) {}
+    context: ItemContext,
+  ) {
+    this.context = context
+  }
 
   invalidate(): void {
     this.cacheWidth = undefined
     this.cacheLines = undefined
+  }
+
+  /** Swap the rendering context (theme switch) and drop all caches. */
+  setContext(context: ItemContext): void {
+    this.context = context
+    this.entries.length = 0
+    this.invalidate()
   }
 
   render(width: number): string[] {

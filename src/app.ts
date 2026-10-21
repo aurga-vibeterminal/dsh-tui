@@ -40,10 +40,11 @@ import { fuzzyFileItems, resolveFdPath } from './components/file-search.ts'
 import { TranscriptModel } from './events.ts'
 import { TranscriptView, type ItemContext } from './components/transcript.ts'
 import { LineText } from './components/line-text.ts'
-import { ApprovalDialog, EventsDialog, QuestionDialog } from './dialogs.ts'
+import { ApprovalDialog, EventsDialog, ListDialog, QuestionDialog } from './dialogs.ts'
 import { StatusLine } from './components/status-line.ts'
 import type {} from '@deepseek-ai/dsh-permission-presets'
-import { markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
+import { THEME_NAMES, markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
+import { writeFile } from 'node:fs/promises'
 import { createDebugLogger, StderrCapture, type Logger } from './util/log.ts'
 import packageInfo from '../package.json'
 
@@ -121,7 +122,8 @@ export class TuiApp {
     private readonly header: StatusLine,
     private readonly hints: LineText,
     private readonly editor: Editor,
-    private readonly theme: Theme,
+    private theme: Theme,
+    private itemContext: ItemContext,
     private readonly log: Logger,
     private readonly disposers: Array<() => void>,
   ) {}
@@ -163,7 +165,7 @@ export class TuiApp {
     }
     tui.setFocus(editor)
 
-    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, log, [])
+    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, itemContext, log, [])
     app.wire(model)
     app.wireInteractions(ctx)
     app.wireCommands()
@@ -215,6 +217,76 @@ export class TuiApp {
       return
     }
     await this.switchSession(childId)
+  }
+
+  /** Overlay with the current todo list. */
+  private async showTodoList(): Promise<void> {
+    const todos = this.driver.model.todos
+    if (todos === undefined || todos.length === 0) {
+      this.driver.model.pushNotice('· no todos recorded')
+      return
+    }
+    const rows = todos.map(entry => {
+      const mark = entry.status === 'completed' ? '☑' : entry.status === 'in_progress' ? '◐' : '☐'
+      const styled = entry.status === 'completed'
+        ? this.theme.dim(` ${mark} ${entry.content}`)
+        : entry.status === 'in_progress'
+          ? this.theme.accent(` ${mark} ${entry.content}`)
+          : ` ${mark} ${entry.content}`
+      return styled
+    })
+    await this.showDialog(new ListDialog('todos', rows, this.theme))
+  }
+
+  /** Theme picker + live re-skin of every rendered surface. */
+  private async pickTheme(argument: string): Promise<void> {
+    if (argument !== '') {
+      this.applyTheme(argument)
+      return
+    }
+    const dialog = new QuestionDialog({
+      questions: [{
+        id: 'theme',
+        question: 'Theme',
+        options: THEME_NAMES.map(name => ({ label: name })),
+      }],
+    }, this.theme)
+    const answer = await this.showDialog(dialog)
+    const selected = answer.answers[0]?.selected[0]
+    if (selected === undefined) {
+      this.driver.model.pushNotice('· theme picker cancelled')
+      return
+    }
+    this.applyTheme(selected)
+  }
+
+  private applyTheme(name: string): void {
+    const next = themeByName(name)
+    if (next === this.theme) {
+      this.driver.model.pushNotice(`· theme stays ${name}`)
+      return
+    }
+    this.theme = next
+    this.itemContext = { theme: next, markdownTheme: markdownThemeFor(next) }
+    this.transcript.setContext(this.itemContext)
+    this.editor.borderColor = next.border
+    this.driver.model.pushNotice(`· theme → ${name}`)
+    this.tui.requestRender()
+  }
+
+  /** Export the transcript as Markdown. */
+  private async exportTranscript(pathArgument: string): Promise<void> {
+    const model = this.driver.model
+    const sessionId = String(this.driver.session.id)
+    const path = pathArgument === '' ? `dsh-tui-${sessionId.slice(0, 13)}.md` : pathArgument
+    const markdown = renderTranscriptMarkdown(model, sessionId)
+    try {
+      await writeFile(path, markdown, 'utf8')
+      this.driver.model.pushNotice(`· exported ${markdown.length} bytes → ${path}`)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.driver.model.pushNotice(`· export failed: ${message.slice(0, 140)}`, 'error')
+    }
   }
 
   /** Overlay picker over the llm catalog; applies the switch to the next step. */
@@ -471,6 +543,9 @@ export class TuiApp {
         { name: 'inbox', description: 'view and remove queued or steering input' },
         { name: 'fork', description: 'fork the current session and switch to it' },
         { name: 'expand', description: 'toggle all tool detail cards' },
+        { name: 'todo', description: 'show the current todo list' },
+        { name: 'theme', description: 'switch color theme (dark/light)' },
+        { name: 'export', description: 'export the transcript as Markdown' },
       ]
       const fdPath = resolveFdPath()
       this.editor.setAutocompleteProvider(new ComposerAutocomplete(
@@ -508,6 +583,18 @@ export class TuiApp {
     }
     if (line === '/expand') {
       this.driver.model.toggleAllToolDetails()
+      return true
+    }
+    if (line === '/todo' || line === '/todos') {
+      await this.showTodoList()
+      return true
+    }
+    if (line === '/theme' || line.startsWith('/theme ')) {
+      await this.pickTheme(line.slice(6).trim())
+      return true
+    }
+    if (line === '/export' || line.startsWith('/export ')) {
+      await this.exportTranscript(line.slice(7).trim())
       return true
     }
     if (line === '/model' || line === '/models') {
@@ -614,8 +701,8 @@ export class TuiApp {
 
   private wire(model: TranscriptModel): void {
     const render = (): void => {
-      this.header.set(headerLine(model), this.driver.running)
-      this.hints.setText(hintsLine(this.driver))
+      this.header.set(headerLine(model, this.theme), this.driver.running)
+      this.hints.setText(hintsLine(this.driver, this.theme))
     }
     // Exceptions inside event listeners and render callbacks would take down
     // the whole process (uncaught in a timer/stdin context); degrade to a
@@ -816,8 +903,7 @@ function firstLineOf(text: string): string {
   return line.length > 48 ? `${line.slice(0, 47)}…` : line
 }
 
-function headerLine(model: TranscriptModel): string {
-  const theme = themeByName(undefined)
+function headerLine(model: TranscriptModel, theme: Theme): string {
   const project = basename(process.cwd())
   const title = model.title === undefined ? 'new session' : truncate(model.title, 24)
   const preset = model.preset === undefined ? '' : ` · ${model.preset}`
@@ -827,8 +913,7 @@ function headerLine(model: TranscriptModel): string {
   return theme.dim(` ${project} · ${title}${preset}${modelSegment} · ${tokens}`)
 }
 
-function hintsLine(driver: AgentDriver): string {
-  const theme = themeByName(undefined)
+function hintsLine(driver: AgentDriver, theme: Theme): string {
   return theme.dim(driver.running
     ? 'enter queue · alt+enter steer · esc interrupt · ctrl+q quit'
     : 'enter send · alt+enter steer · / commands · ctrl+q quit')
@@ -845,6 +930,45 @@ interface SessionQueryLike {
     live: boolean
   }[]>
   readTitleSnapshots(ids: readonly string[], signal?: AbortSignal): Promise<readonly unknown[]>
+}
+
+/** Markdown export of one transcript. */
+function renderTranscriptMarkdown(model: TranscriptModel, sessionId: string): string {
+  const lines: string[] = [
+    `# ${model.title === undefined ? 'dsh-tui transcript' : model.title}`,
+    '',
+    `> session \`${sessionId}\` · model ${model.model ?? '(default)'} · ${model.inputTokens + model.outputTokens} tokens · exported ${new Date().toISOString()}`,
+    '',
+  ]
+  for (const item of model.items) {
+    switch (item.kind) {
+      case 'user':
+        lines.push('## ❯ user', '', item.text, '')
+        break
+      case 'assistant': {
+        lines.push('## assistant', '')
+        if (item.reasoning !== '') lines.push('<details><summary>reasoning</summary>', '', item.reasoning, '', '</details>', '')
+        if (item.text !== '') lines.push(item.text, '')
+        if (item.usage !== undefined) {
+          lines.push(`> ${String(item.usage.inputTokens)} in / ${String(item.usage.outputTokens)} out tokens`, '')
+        }
+        break
+      }
+      case 'tool': {
+        const headline = item.resultView !== undefined || item.callView !== undefined
+          ? item.name
+          : `${item.name} ${item.argDigest}`
+        lines.push(`**tool** \`${headline}\`${item.status === 'error' ? ' *(error)*' : ''}`)
+        if (item.resultDigest !== undefined) lines.push('', '```text', item.resultDigest, '```')
+        lines.push('')
+        break
+      }
+      case 'notice':
+        lines.push(`> ${item.text.replace(/^·\s*/, '')}`, '')
+        break
+    }
+  }
+  return `${lines.join('\n')}\n`
 }
 
 /** Startup banner: version, current route, developer contact, first hints. */
