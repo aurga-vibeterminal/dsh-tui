@@ -33,6 +33,8 @@ export interface DriverOptions {
 }
 
 export interface AgentDriver {
+  /** The live Agent handle (command execution needs it). */
+  readonly agent: Agent
   readonly session: Agent['session']
   readonly model: TranscriptModel
   /** Current live status of the whole agent. */
@@ -137,6 +139,7 @@ export async function createDriver(
   })
 
   return {
+    agent,
     session: agent.session,
     model,
     get running(): boolean {

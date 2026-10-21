@@ -50,6 +50,7 @@ export type TranscriptItem =
 /** Aggregate status the header bar renders. */
 export interface TranscriptStatus {
   title: string | undefined
+  preset: string | undefined
   inputTokens: number
   outputTokens: number
   unknownEventTypes: ReadonlyMap<string, number>
@@ -79,6 +80,8 @@ export class TranscriptModel {
 
   readonly items: TranscriptItem[] = []
   title: string | undefined
+  /** Current permission preset name, from `permission/preset` events. */
+  preset: string | undefined
   inputTokens = 0
   outputTokens = 0
 
@@ -93,6 +96,7 @@ export class TranscriptModel {
   get status(): TranscriptStatus {
     return {
       title: this.title,
+      preset: this.preset,
       inputTokens: this.inputTokens,
       outputTokens: this.outputTokens,
       unknownEventTypes: this.unknownCounts,
@@ -179,6 +183,21 @@ export class TranscriptModel {
       return
     }
     if (type.startsWith('session-log-deepseek/') || type.startsWith('llm/') || type.startsWith('plugin:')) {
+      return
+    }
+    if (type === 'permission/preset') {
+      this.preset = (event as unknown as { data: { preset: string } }).data.preset
+      this.items.push({
+        kind: 'notice',
+        id: localId('preset'),
+        text: `· permission → ${this.preset}`,
+        tone: 'dim',
+      })
+      this.changed()
+      return
+    }
+    if (type === 'command/run' || type === 'command/done') {
+      // The TUI shows command results from its own dispatch path.
       return
     }
     switch (event.type) {
