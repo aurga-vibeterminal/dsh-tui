@@ -114,6 +114,103 @@ export class TuiApp {
     return app
   }
 
+  /** Overlay picker over the llm catalog; applies the switch to the next step. */
+  private async pickModel(): Promise<void> {
+    const llm = this.ctx.get('llm')
+    if (llm === undefined) {
+      this.driver.model.pushNotice('· llm service unavailable', 'error')
+      return
+    }
+    interface ModelEntry { provider: string, id: string, name: string, efforts: readonly { id: string, name: string }[] }
+    const entries: ModelEntry[] = []
+    try {
+      for (const provider of llm.listProviders()) {
+        const models = await llm.listModels(provider.id) as readonly {
+          provider: string, id: string, name: string,
+          reasoning?: { efforts?: readonly { id: string, name: string }[] }
+        }[]
+        for (const info of models) {
+          entries.push({ provider: info.provider, id: info.id, name: info.name, efforts: info.reasoning?.efforts ?? [] })
+        }
+      }
+    } catch (error: unknown) {
+      this.driver.model.pushNotice(`· model catalog failed: ${error instanceof Error ? error.message : String(error)}`, 'error')
+      return
+    }
+    if (entries.length === 0) {
+      this.driver.model.pushNotice('· no models advertised')
+      return
+    }
+
+    const currentRoute = `${this.driver.route.provider}/${this.driver.route.model}`
+    const labels = new Map<string, ModelEntry>()
+    const options = entries.map(entry => {
+      const label = `${entry.provider}/${entry.id}`
+      labels.set(label, entry)
+      return {
+        label,
+        ...(entry.name === '' || entry.name === entry.id ? {} : { description: entry.name }),
+      }
+    })
+    const dialog = new QuestionDialog({
+      questions: [{ id: 'model', question: `Model (current: ${truncate(currentRoute, 44)})`, options }],
+    }, this.theme)
+    const answer = await this.showDialog(dialog)
+    const chosenLabel = answer.answers[0]?.selected[0]
+    if (chosenLabel === undefined) {
+      this.driver.model.pushNotice('· model picker cancelled')
+      return
+    }
+    const chosen = labels.get(chosenLabel)
+    if (chosen === undefined) return
+
+    // Effort follow-up when the model offers more than one.
+    let effort: string | undefined
+    if (chosen.efforts.length > 1) {
+      const effortDialog = new QuestionDialog({
+        questions: [{
+          id: 'effort',
+          question: `Reasoning effort for ${chosen.id}`,
+          options: chosen.efforts.map(candidate => ({
+            label: candidate.name === '' ? candidate.id : candidate.name,
+            description: candidate.id,
+          })),
+        }],
+      }, this.theme)
+      const effortAnswer = await this.showDialog(effortDialog)
+      const effortLabel = effortAnswer.answers[0]?.selected[0]
+      if (effortLabel === undefined) {
+        this.driver.model.pushNotice('· effort picker cancelled; keeping the default')
+      } else {
+        const found = chosen.efforts.find(candidate => (candidate.name === '' ? candidate.id : candidate.name) === effortLabel)
+        effort = found?.id
+      }
+    }
+
+    try {
+      this.driver.setModel({ provider: chosen.provider, model: chosen.id, reasoningEffort: effort })
+      this.driver.model.pushNotice(`· model → ${chosen.provider}/${chosen.id}${effort === undefined ? '' : ` (effort ${effort})`}`)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.driver.model.pushNotice(`· model switch failed: ${message.slice(0, 140)}`, 'error')
+    }
+  }
+
+  /** /cwd with no argument shows the directory; with one it changes it. */
+  private async dispatchCwd(path: string): Promise<void> {
+    if (path === '') {
+      this.driver.model.pushNotice(`· cwd ${this.driver.workingDirectory()}`)
+      return
+    }
+    try {
+      const resolved = await this.driver.setWorkingDirectory(path)
+      this.driver.model.pushNotice(`· cwd → ${resolved}`)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.driver.model.pushNotice(`· cwd change failed: ${message.slice(0, 140)}`, 'error')
+    }
+  }
+
   /** Overlay picker over stored sessions; switching rebuilds the driver on the target. */
   private async pickSession(): Promise<void> {
     if (this.driver.running) {
@@ -266,6 +363,8 @@ export class TuiApp {
         { name: 'clear', description: 'clear the transcript view' },
         { name: 'session', description: 'list stored sessions and switch to one' },
         { name: 'events', description: 'inspect raw session events' },
+        { name: 'model', description: 'switch provider/model/effort' },
+        { name: 'cwd', description: 'show or change the working directory' },
       ]
       this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(items, process.cwd()))
     } catch (error: unknown) {
@@ -294,6 +393,14 @@ export class TuiApp {
     if (line === '/events') {
       const dialog = new EventsDialog(this.driver.model.recent, this.theme)
       await this.showDialog(dialog)
+      return true
+    }
+    if (line === '/model' || line === '/models') {
+      await this.pickModel()
+      return true
+    }
+    if (line === '/cwd' || line.startsWith('/cwd ')) {
+      await this.dispatchCwd(line.slice(4).trim())
       return true
     }
     if (commands === undefined) {
@@ -457,6 +564,16 @@ export class TuiApp {
           this.tui.renderNow(true)
           return { consume: true }
         }
+        // Alt+Enter submits the composer as a steering message for the next
+        // step of the running turn (Enter stays send/queue; Shift+Enter and
+        // Ctrl+Enter remain newline). Consumed before the editor sees it.
+        if (matchesKey(data, Key.alt('enter'))) {
+          const text = this.editor.getText().trim()
+          if (text !== '') {
+            this.submitText(text, true)
+            return { consume: true }
+          }
+        }
         return undefined
       } catch (error: unknown) {
         // An input-handler exception would crash the process from inside the
@@ -471,21 +588,7 @@ export class TuiApp {
     this.editor.onSubmit = (text: string): void => {
       const trimmed = text.trim()
       if (trimmed === '') return
-      if (trimmed.startsWith('/')) {
-        void this.dispatchCommand(trimmed).catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error)
-          this.driver.model.pushNotice(`· command failed: ${message.slice(0, 120)}`, 'error')
-        })
-        return
-      }
-      try {
-        if (this.driver.running) this.driver.model.pushNotice(`(queued: ${firstLineOf(trimmed)})`)
-        this.driver.send(trimmed)
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error)
-        this.log.debug(`submit failed: ${message}`)
-        this.driver.model.pushNotice(`· send failed: ${message.slice(0, 120)}`, 'error')
-      }
+      this.submitText(trimmed, false)
     }
 
     this.tui.start()
@@ -495,6 +598,31 @@ export class TuiApp {
     return new Promise<AppResult>((resolve) => {
       this.onShutdown = (code) => { resolve({ exitCode: code }) }
     })
+  }
+
+  /** One submission path for Enter (send/queue) and Alt+Enter (steer). */
+  private submitText(trimmed: string, steer: boolean): void {
+    this.editor.addToHistory(trimmed)
+    if (trimmed.startsWith('/')) {
+      void this.dispatchCommand(trimmed).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        this.driver.model.pushNotice(`· command failed: ${message.slice(0, 120)}`, 'error')
+      })
+      return
+    }
+    try {
+      if (steer) {
+        this.driver.steer(trimmed)
+        this.driver.model.pushNotice(`(steering: ${firstLineOf(trimmed)})`)
+      } else {
+        if (this.driver.running) this.driver.model.pushNotice(`(queued: ${firstLineOf(trimmed)})`)
+        this.driver.send(trimmed)
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.log.debug(`submit failed: ${message}`)
+      this.driver.model.pushNotice(`· send failed: ${message.slice(0, 120)}`, 'error')
+    }
   }
 
   private onShutdown: ((code: number) => void) | undefined
@@ -564,15 +692,17 @@ function headerLine(model: TranscriptModel): string {
   const project = basename(process.cwd())
   const title = model.title === undefined ? 'new session' : truncate(model.title, 24)
   const preset = model.preset === undefined ? '' : ` · ${model.preset}`
+  const modelRoute = truncate(model.model ?? '', 28)
+  const modelSegment = modelRoute === '' ? '' : ` · ${modelRoute}`
   const tokens = `${model.inputTokens + model.outputTokens} tok`
-  return theme.dim(` ${project} · ${title}${preset} · ${tokens}`)
+  return theme.dim(` ${project} · ${title}${preset}${modelSegment} · ${tokens}`)
 }
 
 function hintsLine(driver: AgentDriver): string {
   const theme = themeByName(undefined)
   return theme.dim(driver.running
-    ? 'enter queue · esc interrupt · ctrl+l redraw · ctrl+q quit'
-    : 'enter send · / commands · ctrl+l redraw · ctrl+q quit')
+    ? 'enter queue · alt+enter steer · esc interrupt · ctrl+q quit'
+    : 'enter send · alt+enter steer · / commands · ctrl+q quit')
 }
 
 function truncate(text: string, max: number): string {

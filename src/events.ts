@@ -93,6 +93,8 @@ export class TranscriptModel {
   title: string | undefined
   /** Current permission preset name, from `permission/preset` events. */
   preset: string | undefined
+  /** Current model route, from `model/selection` events. */
+  model: string | undefined
   inputTokens = 0
   outputTokens = 0
 
@@ -222,6 +224,25 @@ export class TranscriptModel {
     }
     if (type === 'command/run' || type === 'command/done') {
       // The TUI shows command results from its own dispatch path.
+      return
+    }
+    if (type === 'model/selection') {
+      const data = (event as unknown as { data: { provider?: string, model?: string, selection?: { provider?: string, model?: string } } }).data
+      const provider = data.selection?.provider ?? data.provider
+      const model = data.selection?.model ?? data.model
+      if (typeof provider === 'string' && typeof model === 'string') {
+        this.model = `${provider}/${model}`
+        this.items.push({ kind: 'notice', id: localId('model'), text: `· model → ${this.model}`, tone: 'dim' })
+        this.changed()
+      }
+      return
+    }
+    if (type === 'working-directory/change') {
+      const cwd = (event as unknown as { data: { cwd?: string } }).data.cwd
+      if (typeof cwd === 'string' && cwd !== '') {
+        this.items.push({ kind: 'notice', id: localId('cwd'), text: `· cwd → ${cwd}`, tone: 'dim' })
+        this.changed()
+      }
       return
     }
     switch (event.type) {

@@ -14,15 +14,23 @@ import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-fs'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-working-directory'
 import type { AssistantStreamFrameLike, TranscriptModel } from './events.ts'
 
 /** Route override from the command line; absent keeps the profile default. */
 export interface DriverModelRoute {
   provider: string
   model: string
+}
+
+/** A model selection applied to the next step. */
+export interface ModelSwitch {
+  provider: string
+  model: string
+  reasoningEffort: string | undefined
 }
 
 export interface DriverOptions {
@@ -41,6 +49,16 @@ export interface AgentDriver {
   readonly running: boolean
   /** Enqueue one user turn (queues into the inbox while a turn runs). */
   send(text: string): void
+  /** Submit one steering message for the next step of the running turn. */
+  steer(text: string): void
+  /** Current model selection route, live. */
+  get route(): { provider: string, model: string }
+  /** Switch the model for the next step. */
+  setModel(switchTo: ModelSwitch): void
+  /** Effective working directory. */
+  workingDirectory(): string
+  /** Change the working directory (durable). */
+  setWorkingDirectory(path: string): Promise<string>
   /** Interrupt the running turn, keeping queued input. */
   cancel(): void
   /** Stop feeding the model; resolves after subscriptions are dropped. */
@@ -76,8 +94,10 @@ export async function createDriver(
     ? { provider: selection.provider, model: selection.model }
     : options.model
   const agentOptions = { provider: route.provider, model: route.model }
+  let selectionRef: ModelSelectionRef | undefined
   const setup = (agentCtx: Context): void => {
     const selected: ModelSelectionRef = { current: selection, assembled: undefined }
+    selectionRef = selected
     installModelSelection(agentCtx, selected)
   }
 
@@ -155,6 +175,39 @@ export async function createDriver(
         content: [{ type: 'text', text }],
         source: { kind: 'user' },
       }))
+    },
+    steer(text: string): void {
+      agent.steer(createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'user' },
+      }))
+    },
+    /** Current selection route, live. */
+    get route(): { provider: string, model: string } {
+      const current = selectionRef?.current
+      return current === undefined ? route : { provider: current.provider, model: current.model }
+    },
+    /** Switch the model for the next step (hot; durable event follows). */
+    setModel(switchTo: ModelSwitch): void {
+      if (selectionRef === undefined) {
+        throw new Error('tui: model selection reference unavailable')
+      }
+      selectionRef.current = {
+        provider: switchTo.provider,
+        model: switchTo.model,
+        ...(switchTo.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(switchTo.reasoningEffort) }),
+      }
+    },
+    /** Effective working directory (session-scoped, durable on change). */
+    workingDirectory(): string {
+      return ctx.get('workingDirectory')?.get(agent.session) ?? cwd
+    },
+    async setWorkingDirectory(path: string): Promise<string> {
+      const service = ctx.get('workingDirectory')
+      if (service === undefined) throw new Error('tui: workingDirectory service unavailable')
+      return await service.set(agent, path)
     },
     cancel(): void {
       agent.cancel({ kind: 'user' }, { keepInbox: true })

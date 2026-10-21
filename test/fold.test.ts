@@ -179,6 +179,16 @@ describe('TranscriptModel · notices and unknown events', () => {
     expect(model.status.preset).toBe('danger-full-access')
   })
 
+  it('tracks model and working-directory switches as notices', () => {
+    const model = new TranscriptModel()
+    model.applyEvent({ type: 'model/selection', seq: 1, time: 0, data: { selection: { provider: 'deepseek-account', model: 'deepseek-v4-pro' } } } as unknown as SessionEvent)
+    expect(model.model).toBe('deepseek-account/deepseek-v4-pro')
+    expect(model.items.some(item => item.kind === 'notice' && item.text.includes('model →'))).toBe(true)
+
+    model.applyEvent({ type: 'working-directory/change', seq: 2, time: 0, data: { cwd: 'D:\\other' } } as unknown as SessionEvent)
+    expect(model.items.some(item => item.kind === 'notice' && item.text.includes('cwd → D:\\other'))).toBe(true)
+  })
+
   it('resets in place for a session switch (array identity preserved)', () => {
     const model = new TranscriptModel()
     model.applyEvent({
