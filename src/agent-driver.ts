@@ -20,7 +20,8 @@ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-working-directory'
-import type { AssistantStreamFrameLike, TranscriptModel } from './events.ts'
+import type { AssistantStreamFrameLike, ToolPresenter, TranscriptModel } from './events.ts'
+import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 
 /** Route override from the command line; absent keeps the profile default. */
 export interface DriverModelRoute {
@@ -75,6 +76,34 @@ export interface AgentDriver {
   dispose(): Promise<void>
   /** Flush the durable session log. */
   flush(): Promise<void>
+}
+
+/**
+ * Builds the fold's {@link ToolPresenter} over the live tool registry. Both
+ * present methods are pure functions of (args, durable result), so views are
+ * identical live and on replay.
+ */
+export function createToolPresenter(ctx: Context): ToolPresenter {
+  return {
+    callView(name: string, rawArgs: string): ToolCallView | undefined {
+      try {
+        const tool = ctx.get('tools')?.get(name)
+        if (tool?.presentCall === undefined) return undefined
+        return tool.presentCall(JSON.parse(rawArgs) as unknown)
+      } catch {
+        return undefined
+      }
+    },
+    resultView(name: string, rawArgs: string, result: { content: unknown, isError: boolean, meta?: unknown }): ToolResultView | undefined {
+      try {
+        const tool = ctx.get('tools')?.get(name)
+        if (tool?.presentResult === undefined) return undefined
+        return tool.presentResult(JSON.parse(rawArgs) as unknown, result as never)
+      } catch {
+        return undefined
+      }
+    },
+  }
 }
 
 /**

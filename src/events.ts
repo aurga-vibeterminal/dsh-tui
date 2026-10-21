@@ -13,6 +13,17 @@
  */
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
+
+/**
+ * Reconstructs tool render-intent views for the fold. Implemented over
+ * `ctx.tools.get(name).presentCall/presentResult` — both are pure functions of
+ * (args, durable result), so live and replay produce identical views.
+ */
+export interface ToolPresenter {
+  callView(name: string, rawArgs: string): ToolCallView | undefined
+  resultView(name: string, rawArgs: string, result: { content: unknown, isError: boolean, meta?: unknown }): ToolResultView | undefined
+}
 
 /** Live `agent/assistant-stream` frames, structural view (see dsh-agent). */
 export type AssistantStreamFrameLike =
@@ -44,7 +55,7 @@ export type ToolStatus = 'running' | 'ok' | 'error'
 export type TranscriptItem =
   | { kind: 'user'; id: string; text: string }
   | { kind: 'assistant'; id: string; live: boolean; text: string; reasoning: string; usage: AssistantUsage | undefined }
-  | { kind: 'tool'; id: string; callId: string; live: boolean; name: string; argDigest: string; status: ToolStatus; resultDigest: string | undefined }
+  | { kind: 'tool'; id: string; callId: string; live: boolean; name: string; argDigest: string; rawArgs: string; status: ToolStatus; resultDigest: string | undefined; callView: ToolCallView | undefined; resultView: ToolResultView | undefined; expanded: boolean }
   | { kind: 'notice'; id: string; text: string; tone: 'dim' | 'error' }
 
 /** One raw event kept for the /events inspector. */
@@ -86,6 +97,11 @@ export class TranscriptModel {
   private readonly unknownCounts = new Map<string, number>()
   private queuedNotices: number[] = []
   private idCounter = 0
+  private readonly presenter: ToolPresenter | undefined
+
+  constructor(presenter?: ToolPresenter) {
+    this.presenter = presenter
+  }
 
   readonly items: TranscriptItem[] = []
   /** Ring buffer of raw durable events for the /events inspector. */
@@ -126,6 +142,29 @@ export class TranscriptModel {
       outputTokens: this.outputTokens,
       unknownEventTypes: this.unknownCounts,
     }
+  }
+
+  /** Toggle the newest tool item's detail block (Ctrl+O). */
+  toggleLastToolDetails(): void {
+    for (let index = this.items.length - 1; index >= 0; index -= 1) {
+      const item = this.items[index]!
+      if (item.kind === 'tool' && !item.live) {
+        item.expanded = !item.expanded
+        this.changed()
+        return
+      }
+    }
+  }
+
+  /** Toggle every settled tool item's detail block (/expand). */
+  toggleAllToolDetails(): void {
+    const tools = this.items.filter(item => item.kind === 'tool' && !item.live)
+    if (tools.length === 0) return
+    const target = !tools.some(item => item.kind === 'tool' && item.expanded)
+    for (const item of tools) {
+      if (item.kind === 'tool') item.expanded = target
+    }
+    this.changed()
   }
 
   /** Local (non-durable) notice, e.g. the queue marker while a turn runs. */
@@ -305,8 +344,12 @@ export class TranscriptModel {
           live: false,
           name: event.data.name,
           argDigest: digestToolArgs(event.data.name, event.data.arguments),
+          rawArgs: event.data.arguments,
           status: 'running',
           resultDigest: undefined,
+          callView: this.presenter?.callView(event.data.name, event.data.arguments),
+          resultView: undefined,
+          expanded: false,
         }
         if (liveIndex >= 0) this.items.splice(liveIndex, 1, item)
         else this.items.push(item)
@@ -318,6 +361,11 @@ export class TranscriptModel {
         if (target !== undefined && target.kind === 'tool') {
           target.status = event.data.message.isError === true ? 'error' : 'ok'
           target.resultDigest = digestToolResult(event.data.message.content)
+          target.resultView = this.presenter?.resultView(target.name, target.rawArgs, {
+            content: event.data.message.content,
+            isError: event.data.message.isError === true,
+            meta: event.data.meta,
+          })
         } else {
           this.countUnknown('tool/result(unpaired)')
         }
@@ -383,8 +431,12 @@ export class TranscriptModel {
       live: true,
       name: name ?? '…',
       argDigest: digestToolArgs(name ?? '', argsDelta),
+      rawArgs: argsDelta,
       status: 'running',
       resultDigest: undefined,
+      callView: undefined,
+      resultView: undefined,
+      expanded: false,
     })
   }
 

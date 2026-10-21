@@ -32,7 +32,7 @@ import {
   type Component,
 } from '@earendil-works/pi-tui'
 import type {} from '@deepseek-ai/dsh-commands'
-import { createDriver, type AgentDriver, type DriverModelRoute } from './agent-driver.ts'
+import { createDriver, createToolPresenter, type AgentDriver, type DriverModelRoute } from './agent-driver.ts'
 import { TranscriptModel } from './events.ts'
 import { TranscriptView, type ItemContext } from './components/transcript.ts'
 import { LineText } from './components/line-text.ts'
@@ -78,7 +78,7 @@ export class TuiApp {
   static async create(ctx: Context, options: AppOptions): Promise<TuiApp> {
     const theme = themeByName(options.theme)
     const log = createDebugLogger()
-    const model = new TranscriptModel()
+    const model = new TranscriptModel(createToolPresenter(ctx))
     const driver = await createDriver(ctx, model, { resume: options.resume, model: options.model })
 
     const stderr = new StderrCapture(log)
@@ -415,6 +415,7 @@ export class TuiApp {
         { name: 'cwd', description: 'show or change the working directory' },
         { name: 'inbox', description: 'view and remove queued or steering input' },
         { name: 'fork', description: 'fork the current session and switch to it' },
+        { name: 'expand', description: 'toggle all tool detail cards' },
       ]
       this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(items, process.cwd()))
     } catch (error: unknown) {
@@ -443,6 +444,10 @@ export class TuiApp {
     if (line === '/events') {
       const dialog = new EventsDialog(this.driver.model.recent, this.theme)
       await this.showDialog(dialog)
+      return true
+    }
+    if (line === '/expand') {
+      this.driver.model.toggleAllToolDetails()
       return true
     }
     if (line === '/model' || line === '/models') {
@@ -620,6 +625,12 @@ export class TuiApp {
         // repaint erases the damage. Classic Ctrl+L redraw.
         if (matchesKey(data, Key.ctrl('l'))) {
           this.tui.renderNow(true)
+          return { consume: true }
+        }
+        // Ctrl+O toggles the newest tool item's detail card (diff, read
+        // slice, terminal output, search list).
+        if (matchesKey(data, Key.ctrl('o'))) {
+          this.driver.model.toggleLastToolDetails()
           return { consume: true }
         }
         // Alt+Enter submits the composer as a steering message for the next
