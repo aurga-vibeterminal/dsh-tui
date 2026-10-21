@@ -45,6 +45,8 @@ export interface AgentDriver {
   cancel(): void
   /** Stop feeding the model; resolves after subscriptions are dropped. */
   stop(): void
+  /** Stop feeding and retire the agent entirely (session switch). */
+  dispose(): Promise<void>
   /** Flush the durable session log. */
   flush(): Promise<void>
 }
@@ -83,16 +85,19 @@ export async function createDriver(
   const cwd = fs === undefined ? process.cwd() : fs.processPath(await fs.resolve('.'))
 
   let agent: Agent
+  let handle: { agent: Agent, dispose(): Promise<void> }
   if (options.resume === undefined) {
     const sessionId = brandString<SessionId>(`session-${randomUUID()}`)
-    agent = (await agents.create({ sessionId, meta: { cwd }, agentOptions, setup })).agent
+    handle = await agents.create({ sessionId, meta: { cwd }, agentOptions, setup })
+    agent = handle.agent
   } else {
     if (ctx.get('sessionPersistence') === undefined) {
       throw new Error('tui --resume requires the sessionPersistence service; dsh-base provides it')
     }
     const resumeSessionId = brandString<SessionId>(options.resume)
     try {
-      agent = (await agents.resume({ resumeSessionId, agentOptions, setup })).agent
+      handle = await agents.resume({ resumeSessionId, agentOptions, setup })
+      agent = handle.agent
     } catch (error: unknown) {
       throw new Error(`tui: cannot resume session "${options.resume}": ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -159,6 +164,14 @@ export async function createDriver(
       stopStream()
       stopStatus()
       stopErrors()
+    },
+    /** Stop feeding and retire the agent entirely (session switch). */
+    async dispose(): Promise<void> {
+      stopEvents()
+      stopStream()
+      stopStatus()
+      stopErrors()
+      await handle.dispose()
     },
     async flush(): Promise<void> {
       await sessions.flush(agent.session)

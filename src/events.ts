@@ -93,6 +93,18 @@ export class TranscriptModel {
     }
   }
 
+  /** Clear everything for a session switch; keeps listeners and the items array identity. */
+  reset(): void {
+    this.items.length = 0
+    this.live.clear()
+    this.queuedNotices = []
+    this.title = undefined
+    this.preset = undefined
+    this.inputTokens = 0
+    this.outputTokens = 0
+    this.changed()
+  }
+
   get status(): TranscriptStatus {
     return {
       title: this.title,

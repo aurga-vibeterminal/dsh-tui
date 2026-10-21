@@ -178,6 +178,29 @@ describe('TranscriptModel · notices and unknown events', () => {
     expect(model.items.some(item => item.kind === 'notice' && item.text.includes('danger-full-access'))).toBe(true)
     expect(model.status.preset).toBe('danger-full-access')
   })
+
+  it('resets in place for a session switch (array identity preserved)', () => {
+    const model = new TranscriptModel()
+    model.applyEvent({
+      type: 'user/message',
+      seq: 1,
+      time: 0,
+      data: { content: [{ type: 'text', text: 'old' }], source: { kind: 'user' }, role: 'user', id: 'x' },
+    } as unknown as SessionEvent)
+    const items = model.items
+    let notified = 0
+    const dispose = model.onChange(() => { notified += 1 })
+
+    model.reset()
+
+    expect(model.items).toBe(items)
+    expect(model.items).toHaveLength(0)
+    expect(model.title).toBeUndefined()
+    expect(model.preset).toBeUndefined()
+    expect(model.inputTokens).toBe(0)
+    expect(notified).toBeGreaterThan(0)
+    dispose()
+  })
 })
 
 describe('interrupted turn · fold and render the aborted state', () => {

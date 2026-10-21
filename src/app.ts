@@ -57,7 +57,7 @@ export interface AppResult {
 export class TuiApp {
   private constructor(
     private readonly ctx: Context,
-    readonly driver: AgentDriver,
+    private driver: AgentDriver,
     private readonly tui: TuiAltScreen,
     private readonly stderr: StderrCapture,
     private readonly transcript: TranscriptView,
@@ -105,15 +105,106 @@ export class TuiApp {
     tui.setFocus(editor)
 
     const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, log, [])
-    app.wire(model, driver)
+    app.wire(model)
     app.wireInteractions(ctx)
-    app.wireCommands(model)
+    app.wireCommands()
     return app
   }
 
+  /** Overlay picker over stored sessions; switching rebuilds the driver on the target. */
+  private async pickSession(): Promise<void> {
+    if (this.driver.running) {
+      this.driver.model.pushNotice('· interrupt the running turn first (esc)')
+      return
+    }
+    const query = this.ctx.get('sessionQuery') as SessionQueryLike | undefined
+    if (query === undefined) {
+      this.driver.model.pushNotice('· sessionQuery service unavailable', 'error')
+      return
+    }
+    const records = (await query.listSessions()).filter(record =>
+      record.header.cwd !== undefined && samePath(record.header.cwd, process.cwd()))
+    if (records.length === 0) {
+      this.driver.model.pushNotice(`· no stored sessions in ${truncate(process.cwd(), 60)}`)
+      return
+    }
+    const titles = new Map<string, string>()
+    try {
+      const observations: readonly unknown[] = await query.readTitleSnapshots(records.map(record => record.header.id))
+      for (const entry of observations) {
+        const observation = entry as { sessionId?: unknown, status?: unknown, value?: { title?: { title?: string } } }
+        if (observation.status !== 'fulfilled') continue
+        const title = observation.value?.title?.title
+        if (typeof observation.sessionId === 'string' && typeof title === 'string' && title !== '') {
+          titles.set(observation.sessionId, title)
+        }
+      }
+    } catch {
+      // Titles are cosmetic; ids and times still identify the entries.
+    }
+
+    const currentId = String(this.driver.session.id)
+    const workspace = process.cwd()
+    const labels = new Map<string, { id: string }>()
+    const options: { label: string, description?: string }[] = []
+    records.slice(0, 20).forEach((record, index) => {
+      const id = String(record.header.id)
+      const isCurrent = id === currentId
+      const title = titles.get(id)
+      const shortId = `${id.slice(0, 13)}…`
+      const label = `${String(index + 1)}. ${isCurrent ? '● ' : ''}${title === undefined ? shortId : truncate(title, 36)}`
+      labels.set(label, { id })
+      const parts = [
+        record.live ? 'live' : 'stored',
+        relativeTime(record.header.createdAt),
+      ]
+      options.push({
+        label,
+        ...(parts.length === 0 ? {} : { description: parts.join(' · ') }),
+      })
+    })
+
+    const dialog = new QuestionDialog({
+      questions: [{ id: 'session', question: `Switch to session (${truncate(workspace, 40)})`, options }],
+    }, this.theme)
+    const answer = await this.showDialog(dialog)
+    const selected = answer.answers[0]?.selected[0]
+    if (selected === undefined) {
+      this.driver.model.pushNotice('· session picker cancelled')
+      return
+    }
+    const chosen = labels.get(selected)
+    if (chosen === undefined || chosen.id === currentId) {
+      this.driver.model.pushNotice('· staying on the current session')
+      return
+    }
+    await this.switchSession(chosen.id)
+  }
+
+  /** Retire the current agent, reset the model, and resume the target session. */
+  private async switchSession(sessionId: string): Promise<void> {
+    const model = this.driver.model
+    try {
+      await this.driver.dispose()
+    } catch (error: unknown) {
+      this.log.debug(`driver dispose failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    model.reset()
+    try {
+      this.driver = await createDriver(this.ctx, model, { resume: sessionId, model: undefined })
+      this.refreshCommandAutocomplete()
+      this.driver.model.pushNotice(`· switched to session ${sessionId.slice(0, 13)}…`)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.log.debug(`session resume failed: ${message}`)
+      this.driver = await createDriver(this.ctx, model, { resume: undefined, model: undefined })
+      this.refreshCommandAutocomplete()
+      this.driver.model.pushNotice(`· resume failed; started a fresh session (${message.slice(0, 100)})`, 'error')
+    }
+  }
+
   /** Overlay picker over the permission-presets catalog; runs /permission <value>. */
-  private async pickPermissionPreset(): Promise<boolean> {
-    const presets = this.ctx.get('permissionPresets')
+  private async pickPermissionPreset(): Promise<boolean> {    const presets = this.ctx.get('permissionPresets')
     if (presets === undefined) {
       this.driver.model.pushNotice('· permission-presets service unavailable', 'error')
       return true
@@ -154,7 +245,7 @@ export class TuiApp {
   }
 
   /** Slash-command dispatch: TUI-local commands plus the runtime registry. */
-  private wireCommands(model: TranscriptModel): void {
+  private wireCommands(): void {
     this.refreshCommandAutocomplete()
     this.disposers.push(this.ctx.on('commands/change', () => {
       this.refreshCommandAutocomplete()
@@ -170,6 +261,7 @@ export class TuiApp {
         ...descriptors.map(descriptor => ({ name: descriptor.name, description: descriptor.description })),
         { name: 'exit', description: 'quit the TUI' },
         { name: 'clear', description: 'clear the transcript view' },
+        { name: 'session', description: 'list stored sessions and switch to one' },
       ]
       this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(items, process.cwd()))
     } catch (error: unknown) {
@@ -189,6 +281,10 @@ export class TuiApp {
     if (line === '/clear') {
       this.transcript.invalidate()
       this.driver.model.pushNotice('· view cleared (session history intact)')
+      return true
+    }
+    if (line === '/session' || line === '/sessions') {
+      await this.pickSession()
       return true
     }
     if (commands === undefined) {
@@ -277,10 +373,10 @@ export class TuiApp {
     return queued
   }
 
-  private wire(model: TranscriptModel, driver: AgentDriver): void {
+  private wire(model: TranscriptModel): void {
     const render = (): void => {
-      this.header.setText(headerLine(model, driver))
-      this.hints.setText(hintsLine(driver))
+      this.header.setText(headerLine(model, this.driver))
+      this.hints.setText(hintsLine(this.driver))
     }
     // Exceptions inside event listeners and render callbacks would take down
     // the whole process (uncaught in a timer/stdin context); degrade to a
@@ -395,16 +491,41 @@ export class TuiApp {
   private onShutdown: ((code: number) => void) | undefined
 
   private async shutdown(code: number): Promise<void> {
-    for (const dispose of this.disposers) dispose()
-    this.driver.stop()
-    this.tui.stop()
-    const pending = this.stderr.restore()
-    if (pending !== '') process.stderr.write(pending)
-    try {
-      await this.driver.flush()
-    } catch (error: unknown) {
-      this.log.debug(`flush failed: ${error instanceof Error ? error.message : String(error)}`)
+    const step = (label: string, action: () => void | Promise<void>): Promise<void> => {
+      return Promise.resolve()
+        .then(action)
+        .catch((error: unknown) => {
+          // A failure in any teardown step must degrade to a log line, never
+          // an unhandled rejection that kills the process after the screen
+          // was already restored.
+          this.log.debug(`shutdown ${label} failed: ${error instanceof Error ? error.message : String(error)}`)
+        })
     }
+
+    for (const dispose of this.disposers) dispose()
+    this.disposers.length = 0
+    await step('stop-driver', () => { this.driver.stop() })
+
+    // pi-tui 1.3.0's stop() document print-back is defective with layout
+    // roots (renders only the scroll region's first row and can throw on
+    // populated transcripts — docs/render-decision.md). Preserve the screen
+    // instead and print the transcript ourselves from the view model.
+    await step('stop-renderer', () => { this.tui.stop({ preserveScreen: true }) })
+    await step('print-transcript', () => { printTranscriptForScrollback(this.transcript) })
+
+    await step('restore-stderr', () => {
+      const pending = this.stderr.restore()
+      if (pending !== '') process.stderr.write(pending)
+    })
+    await step('flush', async () => {
+      await Promise.race([
+        this.driver.flush(),
+        new Promise<void>(resolve => {
+          const timer = setTimeout(resolve, 4000)
+          timer.unref()
+        }),
+      ])
+    })
     this.onShutdown?.(code)
   }
 }
@@ -433,4 +554,44 @@ function hintsLine(driver: AgentDriver): string {
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+/** The sessionQuery surface the picker uses (structural; see dsh-session-query). */
+interface SessionQueryLike {
+  listSessions(signal?: AbortSignal): Promise<readonly {
+    header: { id: string, createdAt: number, cwd?: string | undefined }
+    live: boolean
+  }[]>
+  readTitleSnapshots(ids: readonly string[], signal?: AbortSignal): Promise<readonly unknown[]>
+}
+
+/** Compact relative time for the session picker. */
+function relativeTime(createdAtMs: number): string {
+  const deltaSeconds = Math.max(0, Math.floor((Date.now() - createdAtMs) / 1000))
+  if (deltaSeconds < 60) return `${String(deltaSeconds)}s ago`
+  if (deltaSeconds < 3600) return `${String(Math.floor(deltaSeconds / 60))}m ago`
+  if (deltaSeconds < 86400) return `${String(Math.floor(deltaSeconds / 3600))}h ago`
+  return `${String(Math.floor(deltaSeconds / 86400))}d ago`
+}
+
+/** Case-insensitive, separator-normalized path equality for cwd scoping. */
+function samePath(left: string, right: string): boolean {
+  const normalize = (value: string): string => {
+    const unified = value.replaceAll('/', '\\')
+    return process.platform === 'win32' ? unified.toLowerCase() : value
+  }
+  return normalize(left) === normalize(right)
+}
+
+/**
+ * Print the final transcript into the terminal's normal scrollback after the
+ * alt screen exited (opencode-style exit). Renders from our own view model —
+ * never through the renderer's stop() print-back (defective with layout
+ * roots in pi-tui 1.3.0; see docs/render-decision.md).
+ */
+function printTranscriptForScrollback(transcript: TranscriptView): void {
+  const width = Math.max(40, Math.min(160, process.stdout.columns ?? 80))
+  const lines = transcript.render(width)
+  if (lines.length === 0) return
+  process.stdout.write(`\n${lines.join('\n')}\n`)
 }
