@@ -29,10 +29,14 @@ import {
   ScrollView,
   TuiAltScreen,
   VStack,
+  type AutocompleteItem,
+  type AutocompleteProvider,
+  type AutocompleteSuggestions,
   type Component,
 } from '@earendil-works/pi-tui'
 import type {} from '@deepseek-ai/dsh-commands'
 import { createDriver, createToolPresenter, type AgentDriver, type DriverModelRoute } from './agent-driver.ts'
+import { fuzzyFileItems, resolveFdPath } from './components/file-search.ts'
 import { TranscriptModel } from './events.ts'
 import { TranscriptView, type ItemContext } from './components/transcript.ts'
 import { LineText } from './components/line-text.ts'
@@ -56,6 +60,57 @@ export interface AppResult {
 }
 
 /** Assembly and lifecycle of the fullscreen session. */
+/**
+ * Wraps the combined autocomplete provider so an empty/blank composer never
+ * offers suggestions: deleting the leading "/" must close the command list,
+ * not fall through to the base-path file listing. Forced (Tab) completion is
+ * unaffected.
+ */
+class ComposerAutocomplete implements AutocompleteProvider {
+  constructor(
+    private readonly inner: CombinedAutocompleteProvider,
+    private readonly basePath: string,
+    private readonly fdPath: string | null,
+  ) {}
+
+  async getSuggestions(
+    lines: string[],
+    cursorLine: number,
+    cursorCol: number,
+    options: { signal: AbortSignal, force?: boolean },
+  ): Promise<AutocompleteSuggestions | null> {
+    const before = (lines[cursorLine] ?? '').slice(0, cursorCol)
+    if (before.trim() === '' && options.force !== true) return null
+    // pi-tui's @ fuzzy search silently returns nothing without the fd binary;
+    // answer the @ branch from our bounded walk instead.
+    if (this.fdPath === null) {
+      const atToken = tokenAfterSeparators(before)
+      if (atToken !== null && atToken.startsWith('@') && !atToken.startsWith('@"')) {
+        const items = fuzzyFileItems(this.basePath, atToken)
+        if (items.length === 0) return null
+        return { items, prefix: atToken }
+      }
+    }
+    return await this.inner.getSuggestions(lines, cursorLine, cursorCol, options)
+  }
+
+  applyCompletion(
+    lines: string[],
+    cursorLine: number,
+    cursorCol: number,
+    item: AutocompleteItem,
+    prefix: string,
+  ): { lines: string[], cursorLine: number, cursorCol: number } {
+    return this.inner.applyCompletion(lines, cursorLine, cursorCol, item, prefix)
+  }
+}
+
+/** The last separator-delimited token, or null when none precedes the cursor. */
+function tokenAfterSeparators(before: string): string | null {
+  const match = /([^\s,;:（）「」【】、，。；：'"=]+)$/.exec(before)
+  return match === null ? null : match[1]!
+}
+
 export class TuiApp {
   private constructor(
     private readonly ctx: Context,
@@ -417,7 +472,12 @@ export class TuiApp {
         { name: 'fork', description: 'fork the current session and switch to it' },
         { name: 'expand', description: 'toggle all tool detail cards' },
       ]
-      this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(items, process.cwd()))
+      const fdPath = resolveFdPath()
+      this.editor.setAutocompleteProvider(new ComposerAutocomplete(
+        new CombinedAutocompleteProvider(items, process.cwd(), fdPath),
+        process.cwd(),
+        fdPath,
+      ))
     } catch (error: unknown) {
       this.log.debug(`command autocomplete failed: ${error instanceof Error ? error.message : String(error)}`)
     }
