@@ -124,6 +124,7 @@ export class TuiApp {
     private readonly hints: LineText,
     private readonly editor: Editor,
     private theme: Theme,
+    private themeRef: { current: Theme },
     private itemContext: ItemContext,
     private readonly log: Logger,
     private readonly disposers: Array<() => void>,
@@ -136,6 +137,7 @@ export class TuiApp {
   static async create(ctx: Context, options: AppOptions): Promise<TuiApp> {
     initSystemLocale()
     const theme = themeByName(options.theme)
+    const themeRef: { current: Theme } = { current: theme }
     const log = createDebugLogger()
     const model = new TranscriptModel(createToolPresenter(ctx))
     const driver = await createDriver(ctx, model, { resume: options.resume, model: options.model })
@@ -145,8 +147,8 @@ export class TuiApp {
 
     const tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, {
       // Clickable "jump to bottom" pill shown while the transcript is scrolled
-      // away from the end; the transient scrollbar appears on scroll activity.
-      scrollToEndIndicator: () => theme.accent(' ↓ 最新 '),
+      // away from the end; localized and re-skinned with the live theme.
+      scrollToEndIndicator: () => themeRef.current.accent(t('scroll.jumpToEnd')),
     })
     const itemContext: ItemContext = { theme, markdownTheme: markdownThemeFor(theme) }
 
@@ -177,7 +179,7 @@ export class TuiApp {
     }
     tui.setFocus(editor)
 
-    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, itemContext, log, [])
+    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, themeRef, itemContext, log, [])
     app.wire(model)
     app.wireInteractions(ctx)
     app.wireCommands()
@@ -275,14 +277,15 @@ export class TuiApp {
   private applyTheme(name: string): void {
     const next = themeByName(name)
     if (next === this.theme) {
-      this.driver.model.pushNotice(`· theme stays ${name}`)
+      this.driver.model.pushNotice(t('notice.themeStays', { name }))
       return
     }
     this.theme = next
+    this.themeRef.current = next
     this.itemContext = { theme: next, markdownTheme: markdownThemeFor(next) }
     this.transcript.setContext(this.itemContext)
     this.editor.borderColor = next.border
-    this.driver.model.pushNotice(`· theme → ${name}`)
+    this.driver.model.pushNotice(t('notice.themeChanged', { name }))
     this.tui.requestRender()
   }
 
@@ -456,6 +459,21 @@ export class TuiApp {
     }
   }
 
+  /** Discard the active conversation view and return to the lazy state; the
+   *  old session stays in /session, and the next message starts a new one. */
+  private async startNewSession(): Promise<void> {
+    const model = this.driver.model
+    try {
+      await this.driver.dispose()
+    } catch (error: unknown) {
+      this.log.debug(`driver dispose failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    model.reset()
+    this.driver = await createDriver(this.ctx, model, { resume: undefined, model: undefined, lazy: true })
+    this.refreshCommandAutocomplete()
+    model.pushNotice(t('notice.newSessionStarted'))
+  }
+
   /** Overlay picker over stored sessions; switching rebuilds the driver on the target. */
   private async pickSession(): Promise<void> {
     if (this.driver.running) {
@@ -614,6 +632,7 @@ export class TuiApp {
       { name: 'quit', description: 'quit the TUI (alias: exit)' },
       { name: 'clear', description: 'clear the transcript view' },
       { name: 'session', description: 'list stored sessions and switch (alias: resume)' },
+      { name: 'new', description: 'start a fresh session (old one stays in /session)' },
       { name: 'resume', description: 'switch to a stored session (alias: session)' },
       { name: 'events', description: 'inspect raw session events' },
       { name: 'model', description: 'switch provider/model/effort' },
@@ -713,6 +732,18 @@ export class TuiApp {
     }
     if (line === '/fork') {
       await this.forkSession()
+      return true
+    }
+    if (line === '/new') {
+      if (this.driver.running) {
+        this.driver.model.pushNotice(t('notice.interruptFirst'))
+        return true
+      }
+      if (!this.driver.hasAgent) {
+        this.driver.model.pushNotice(t('notice.alreadyFresh'))
+        return true
+      }
+      await this.startNewSession()
       return true
     }
     if (line === '/cwd' || line.startsWith('/cwd ')) {

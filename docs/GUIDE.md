@@ -64,6 +64,7 @@ TUI-local commands (always available):
 |---|---|
 | `/permission` | Permission-preset picker (`workspace-write`, `read-only`, `danger-full-access`) |
 | `/session` | List this directory's stored sessions; pick one to switch to (alias `/resume`) |
+| `/new` | Start a fresh session (the old one stays in `/session`) |
 | `/fork` | Fork the current session and switch onto the branch |
 | `/model` | Provider / model / reasoning-effort picker (hot-switch, applies to the next step) |
 | `/cwd [path]` | Show or change the session working directory |

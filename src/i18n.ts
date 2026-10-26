@@ -63,6 +63,7 @@ const en = {
   // dialogs: events / list
   'events.title': 'raw events (last {shown} of {total})',
   'dialog.closeHint': ' esc close',
+  'scroll.jumpToEnd': ' ↓ latest ',
   // app: interaction notices
   'notice.queueAgain': '· press ctrl+c again to quit',
   'notice.queued': '(queued: {text})',
@@ -124,6 +125,8 @@ const en = {
   'notice.catalogFailed': '· model catalog failed: {message}',
   'notice.modelChangedNotice': '· model → {route}{effort}',
   'notice.needFirstMessage': '· send your first message to start the session',
+  'notice.alreadyFresh': '· already in a fresh session (nothing to discard)',
+  'notice.newSessionStarted': '· new session started — the previous one remains in /session',
   'notice.agentError': '· error: {message}',
   'notice.permissionServiceUnavailable': '· permission-presets service unavailable',
 } as const
@@ -168,6 +171,7 @@ const tables: Record<Locale, Record<string, string>> = {
     'question.nav': ' · tab 第 {index}/{total} 题',
     'events.title': '原始事件（最近 {shown}/{total} 条）',
     'dialog.closeHint': ' esc 关闭',
+    'scroll.jumpToEnd': ' ↓ 最新 ',
     'notice.queueAgain': '· 再按一次 ctrl+c 退出',
     'notice.queued': '（已排队：{text}）',
     'notice.steering': '（转向：{text}）',
@@ -226,6 +230,8 @@ const tables: Record<Locale, Record<string, string>> = {
     'notice.catalogFailed': '· 模型目录获取失败：{message}',
     'notice.modelChangedNotice': '· 模型 → {route}{effort}',
     'notice.needFirstMessage': '· 发送第一条消息以创建会话',
+    'notice.alreadyFresh': '· 已经是新会话（无需丢弃）',
+    'notice.newSessionStarted': '· 已开启新会话 —— 之前的会话仍保留在 /session 中',
     'notice.agentError': '· error: {message}',
     'notice.permissionServiceUnavailable': '· 权限预设服务不可用',
   },
