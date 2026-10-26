@@ -141,7 +141,11 @@ export class TuiApp {
     const stderr = new StderrCapture(log)
     stderr.install()
 
-    const tui = new TuiAltScreen(new ProcessTerminal())
+    const tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, {
+      // Clickable "jump to bottom" pill shown while the transcript is scrolled
+      // away from the end; the transient scrollbar appears on scroll activity.
+      scrollToEndIndicator: () => theme.accent(' ↓ 最新 '),
+    })
     const itemContext: ItemContext = { theme, markdownTheme: markdownThemeFor(theme) }
 
     const header = new StatusLine(() => {
@@ -155,7 +159,13 @@ export class TuiApp {
     })
     const composer = new VStack([editor, hints])
 
-    const scroll = new ScrollView(transcript, { follow: 'end', primary: true, overscroll: 'chain' })
+    const scroll = new ScrollView(transcript, {
+      follow: 'end',
+      primary: true,
+      overscroll: 'chain',
+      scrollbar: 'auto',
+      scrollbarHideDelayMs: 1500,
+    })
     if (isViewportTUI(tui)) {
       tui.setLayoutRoot(new VStack([
         { component: scroll, basis: 0, grow: 1, minSize: 1 },

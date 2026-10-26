@@ -4,9 +4,9 @@
 # tuiStartup service; the runner injects it and owns the terminal.
 - insert:
     - id: tui-startup
-      name: 'dsh-tui/startup'
+      name: '@vterminal/dsh-tui/startup'
     - id: tui-runner
-      name: 'dsh-tui'
+      name: '@vterminal/dsh-tui'
       inject: [tuiStartup]
       config:
         resume: !!js ctx.tuiStartup.resume
