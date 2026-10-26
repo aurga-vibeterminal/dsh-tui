@@ -12,9 +12,11 @@
 import {
   Key,
   matchesKey,
+  SelectList,
   truncateToWidth,
   visibleWidth,
   type Component,
+  type SelectListTheme,
 } from '@earendil-works/pi-tui'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval/types'
 import type {
@@ -23,6 +25,7 @@ import type {
   AskUserQuestionItem,
 } from '@deepseek-ai/dsh-user-questions/types'
 import type { Theme } from './theme.ts'
+import { selectListThemeFor } from './theme.ts'
 import { t } from './i18n.ts'
 
 /** Present the localized display reason best matching the environment. */
@@ -235,6 +238,72 @@ export class QuestionDialog implements Component {
 export function padLine(line: string, width: number): string {
   const visible = visibleWidth(line)
   return visible >= width ? line : line + ' '.repeat(width - visible)
+}
+
+/**
+ * Scrollable single-select picker over the pi-tui SelectList: pagination and
+ * mouse support come from the list; the wrapper adds a title, hints, and a
+ * `done` promise resolved with the chosen value.
+ */
+export class PickerDialog implements Component {
+  private readonly list: SelectList
+  private settled = false
+  private cacheWidth: number | undefined
+  private cacheLines: string[] | undefined
+
+  readonly done: Promise<string | undefined>
+  private resolveDone!: (value: string | undefined) => void
+
+  constructor(
+    private readonly title: string,
+    items: readonly { value: string, label: string, description?: string }[],
+    private readonly theme: Theme,
+    private readonly hints: string,
+    maxVisible = 12,
+  ) {
+    this.list = new SelectList(
+      items.map(item => ({
+        value: item.value,
+        label: item.label,
+        ...(item.description === undefined ? {} : { description: item.description }),
+      })),
+      maxVisible,
+      selectListThemeFor(theme),
+    )
+    this.done = new Promise<string | undefined>((resolve) => {
+      this.resolveDone = resolve
+    })
+    this.list.onSelect = (item) => {
+      if (this.settled) return
+      this.settled = true
+      this.resolveDone(item.value)
+    }
+    this.list.onCancel = () => {
+      if (this.settled) return
+      this.settled = true
+      this.resolveDone(undefined)
+    }
+  }
+
+  invalidate(): void {
+    this.list.invalidate()
+  }
+
+  handleInput(data: string): void {
+    this.list.handleInput(data)
+  }
+
+  render(width: number): string[] {
+    if (this.cacheLines !== undefined && this.cacheWidth === width) return this.cacheLines
+    const lines = [truncateToWidth(this.theme.accent(` ${this.title}`), width)]
+    for (const line of this.list.render(width - 2)) lines.push(truncateToWidth(` ${line}`, width))
+    lines.push(truncateToWidth(this.theme.dim(` ${this.hints}`), width))
+    this.cacheWidth = width
+    this.cacheLines = lines
+    return lines
+  }
+
+  private settledGetterUnused(): void {}
 }
 
 /** Generic read-only list overlay (todos, exports, static info). */

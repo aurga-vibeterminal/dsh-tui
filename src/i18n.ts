@@ -123,6 +123,9 @@ const en = {
   'notice.noModels': '· no models advertised',
   'notice.catalogFailed': '· model catalog failed: {message}',
   'notice.modelChangedNotice': '· model → {route}{effort}',
+  'notice.needFirstMessage': '· send your first message to start the session',
+  'notice.agentError': '· error: {message}',
+  'notice.permissionServiceUnavailable': '· permission-presets service unavailable',
 } as const
 
 export type MessageKey = keyof typeof en
@@ -222,6 +225,9 @@ const tables: Record<Locale, Record<string, string>> = {
     'notice.noModels': '· 未发现可用模型',
     'notice.catalogFailed': '· 模型目录获取失败：{message}',
     'notice.modelChangedNotice': '· 模型 → {route}{effort}',
+    'notice.needFirstMessage': '· 发送第一条消息以创建会话',
+    'notice.agentError': '· error: {message}',
+    'notice.permissionServiceUnavailable': '· 权限预设服务不可用',
   },
 }
 

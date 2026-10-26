@@ -3,6 +3,7 @@
 An opencode-style fullscreen terminal console for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). This guide covers launching, keys, commands, and troubleshooting.
 
 - [Install & launch](#install--launch)
+- [Sessions](#sessions)
 - [Keyboard reference](#keyboard-reference)
 - [Commands](#commands)
 - [File references in prompts](#file-references-in-prompts)
@@ -25,6 +26,13 @@ dsh tui --model deepseek-account/deepseek-v4-flash # explicit model route
 ```
 
 The profile composes `dsh-base` plus the TUI bundle; sessions are stored per working directory under your Harness home (`~/.dsh` by default).
+
+## Sessions
+
+- A session is created **only when you send the first message** — quitting without typing leaves nothing behind.
+- `/session` lists this directory's stored sessions (newest first, subagent sessions hidden) in a scrollable picker; pick one to switch (history replays).
+- `/fork` branches the current session and switches onto the copy.
+- In the dsh **web** UI these sessions may appear under "ungrouped": the web groups sessions by *workspace attachment*, a web-profile concept this TUI does not compose. Grouping by project folder is a candidate upstream suggestion (PLAN §7.4).
 
 ## Keyboard reference
 

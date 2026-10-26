@@ -289,7 +289,7 @@ export class TuiApp {
   /** Export the transcript as Markdown. */
   private async exportTranscript(pathArgument: string): Promise<void> {
     const model = this.driver.model
-    const sessionId = String(this.driver.session.id)
+    const sessionId = this.driver.hasAgent ? String(this.driver.session?.id ?? 'session') : 'unstarted'
     const path = pathArgument === '' ? `dsh-tui-${sessionId.slice(0, 13)}.md` : pathArgument
     const markdown = renderTranscriptMarkdown(model, sessionId)
     try {
@@ -467,8 +467,12 @@ export class TuiApp {
       this.driver.model.pushNotice('· sessionQuery service unavailable', 'error')
       return
     }
+    // Scope to this workspace and hide subagent child sessions (origin=subagent);
+    // user-created fork branches stay visible.
     const records = (await query.listSessions()).filter(record =>
-      record.header.cwd !== undefined && samePath(record.header.cwd, process.cwd()))
+      record.header.cwd !== undefined
+      && samePath(record.header.cwd, process.cwd())
+      && record.header.origin !== 'subagent')
     if (records.length === 0) {
       this.driver.model.pushNotice(`· no stored sessions in ${truncate(process.cwd(), 60)}`)
       return
@@ -488,42 +492,43 @@ export class TuiApp {
       // Titles are cosmetic; ids and times still identify the entries.
     }
 
-    const currentId = String(this.driver.session.id)
+    const currentId = this.driver.hasAgent ? String(this.driver.session?.id ?? '') : ''
     const workspace = process.cwd()
-    const labels = new Map<string, { id: string }>()
-    const options: { label: string, description?: string }[] = []
-    records.slice(0, 20).forEach((record, index) => {
+    const options: { value: string, label: string, description?: string }[] = []
+    records.forEach((record) => {
       const id = String(record.header.id)
       const isCurrent = id === currentId
       const title = titles.get(id)
       const shortId = `${id.slice(0, 13)}…`
-      const label = `${String(index + 1)}. ${isCurrent ? '● ' : ''}${title === undefined ? shortId : truncate(title, 36)}`
-      labels.set(label, { id })
+      const label = `${isCurrent ? '● ' : ''}${title === undefined ? shortId : truncate(title, 36)}`
       const parts = [
         record.live ? 'live' : 'stored',
         relativeTime(record.header.createdAt),
       ]
       options.push({
+        value: id,
         label,
         ...(parts.length === 0 ? {} : { description: parts.join(' · ') }),
       })
     })
 
     const dialog = new QuestionDialog({
-      questions: [{ id: 'session', question: t('dialog.sessionTitle', { workspace: truncate(workspace, 40) }), options }],
+      questions: [{ id: 'session', question: t('dialog.sessionTitle', { workspace: truncate(workspace, 40) }), options: options.map(option => ({ label: option.label, ...(option.description === undefined ? {} : { description: option.description }) })) }],
     }, this.theme)
     const answer = await this.showDialog(dialog)
     const selected = answer.answers[0]?.selected[0]
     if (selected === undefined) {
-      this.driver.model.pushNotice('· session picker cancelled')
+      this.driver.model.pushNotice(t('notice.sessionCancelled'))
       return
     }
-    const chosen = labels.get(selected)
-    if (chosen === undefined || chosen.id === currentId) {
-      this.driver.model.pushNotice('· staying on the current session')
+    // Map the chosen label back to its session id (labels are unique:
+    // '● '-prefixed current marker + truncated title/short id + index-free).
+    const chosen = options.find(option => option.label === selected)
+    if (chosen === undefined || chosen.value === currentId) {
+      this.driver.model.pushNotice(t('notice.sessionStays'))
       return
     }
-    await this.switchSession(chosen.id)
+    await this.switchSession(chosen.value)
   }
 
   /** Retire the current agent, reset the model, and resume the target session. */
@@ -549,15 +554,20 @@ export class TuiApp {
   }
 
   /** Overlay picker over the permission-presets catalog; runs /permission <value>. */
-  private async pickPermissionPreset(): Promise<boolean> {    const presets = this.ctx.get('permissionPresets')
+  private async pickPermissionPreset(): Promise<boolean> {
+    if (!this.driver.hasAgent) {
+      this.driver.model.pushNotice(t('notice.needFirstMessage'))
+      return true
+    }
+    const presets = this.ctx.get('permissionPresets')
     if (presets === undefined) {
-      this.driver.model.pushNotice('· permission-presets service unavailable', 'error')
+      this.driver.model.pushNotice(t('notice.permissionServiceUnavailable'), 'error')
       return true
     }
     let current: string
     let options: { value: string, name: string, description?: string }[]
     try {
-      current = presets.current(this.driver.agent.session)
+      current = presets.current(this.driver.agent!.session)
       const catalog = presets.catalog()
       options = catalog.options.filter(option => option.value !== 'custom')
     } catch (error: unknown) {
@@ -599,43 +609,47 @@ export class TuiApp {
 
   private refreshCommandAutocomplete(): void {
     const commands = this.ctx.get('commands')
-    if (commands === undefined) return
-    try {
-      const descriptors = commands.list(this.driver.agent)
-      const items = [
-        ...descriptors.map(descriptor => ({ name: descriptor.name, description: descriptor.description })),
-        { name: 'exit', description: 'quit the TUI (alias: quit)' },
-        { name: 'quit', description: 'quit the TUI (alias: exit)' },
-        { name: 'clear', description: 'clear the transcript view' },
-        { name: 'session', description: 'list stored sessions and switch (alias: resume)' },
-        { name: 'resume', description: 'switch to a stored session (alias: session)' },
-        { name: 'events', description: 'inspect raw session events' },
-        { name: 'model', description: 'switch provider/model/effort' },
-        { name: 'cwd', description: 'show or change the working directory' },
-        { name: 'inbox', description: 'view and remove queued or steering input' },
-        { name: 'fork', description: 'fork the current session and switch to it' },
-        { name: 'expand', description: 'toggle all tool detail cards' },
-        { name: 'todo', description: 'show the current todo list' },
-        { name: 'theme', description: 'switch color theme (dark/light)' },
-        { name: 'language', description: 'switch UI language' },
-        { name: 'export', description: 'export the transcript as Markdown' },
-        { name: 'copy', description: 'copy an assistant reply to the clipboard' },
-      ]
-      const fdPath = resolveFdPath()
-      this.editor.setAutocompleteProvider(new ComposerAutocomplete(
-        new CombinedAutocompleteProvider(items, process.cwd(), fdPath),
-        process.cwd(),
-        fdPath,
-      ))
-    } catch (error: unknown) {
-      this.log.debug(`command autocomplete failed: ${error instanceof Error ? error.message : String(error)}`)
+    const localItems = [
+      { name: 'exit', description: 'quit the TUI (alias: quit)' },
+      { name: 'quit', description: 'quit the TUI (alias: exit)' },
+      { name: 'clear', description: 'clear the transcript view' },
+      { name: 'session', description: 'list stored sessions and switch (alias: resume)' },
+      { name: 'resume', description: 'switch to a stored session (alias: session)' },
+      { name: 'events', description: 'inspect raw session events' },
+      { name: 'model', description: 'switch provider/model/effort' },
+      { name: 'cwd', description: 'show or change the working directory' },
+      { name: 'inbox', description: 'view and remove queued or steering input' },
+      { name: 'fork', description: 'fork the current session and switch to it' },
+      { name: 'expand', description: 'toggle all tool detail cards' },
+      { name: 'todo', description: 'show the current todo list' },
+      { name: 'theme', description: 'switch color theme (dark/light)' },
+      { name: 'language', description: 'switch UI language' },
+      { name: 'export', description: 'export the transcript as Markdown' },
+      { name: 'copy', description: 'copy an assistant reply to the clipboard' },
+    ]
+    // Runtime (profile/plugin) commands are agent-scoped: they join the list
+    // once the lazy session has materialized on the first message.
+    if (commands !== undefined && this.driver.hasAgent) {
+      try {
+        const descriptors = commands.list(this.driver.agent!)
+        for (const descriptor of descriptors) {
+          localItems.unshift({ name: descriptor.name, description: descriptor.description })
+        }
+      } catch (error: unknown) {
+        this.log.debug(`command list failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
     }
+    const fdPath = resolveFdPath()
+    this.editor.setAutocompleteProvider(new ComposerAutocomplete(
+      new CombinedAutocompleteProvider(localItems, process.cwd(), fdPath),
+      process.cwd(),
+      fdPath,
+    ))
   }
 
   /** Dispatch one submitted line; returns true when consumed as a command. */
   private async dispatchCommand(line: string): Promise<boolean> {
     if (!line.startsWith('/')) return false
-    const commands = this.ctx.get('commands')
     if (line === '/exit' || line === '/quit') {
       // Exactly Ctrl+Q's path: no notice first — a model change here would
       // invalidate the transcript render cache right before the exit
@@ -645,7 +659,7 @@ export class TuiApp {
     }
     if (line === '/clear') {
       this.transcript.invalidate()
-      this.driver.model.pushNotice('· view cleared (session history intact)')
+      this.driver.model.pushNotice(t('notice.viewCleared'))
       return true
     }
     if (line === '/session' || line === '/sessions' || line === '/resume') {
@@ -705,29 +719,38 @@ export class TuiApp {
       await this.dispatchCwd(line.slice(4).trim())
       return true
     }
-    if (commands === undefined) {
-      this.driver.model.pushNotice('· no command registry composed', 'error')
-      return true
-    }
-    // Bare /permission opens a preset picker instead of printing text.
     if (line === '/permission' || line === '/permissions') {
+      if (!this.driver.hasAgent) {
+        this.driver.model.pushNotice(t('notice.needFirstMessage'))
+        return true
+      }
       return this.pickPermissionPreset()
     }
+    // Runtime (profile/plugin) registry commands need the agent.
+    if (!this.driver.hasAgent) {
+      this.driver.model.pushNotice(t('notice.needFirstMessage'))
+      return true
+    }
+    const commands = this.ctx.get('commands')
+    if (commands === undefined) {
+      this.driver.model.pushNotice(t('notice.noCommandRegistry'), 'error')
+      return true
+    }
     try {
-      const execution = await commands.execute(this.driver.agent, line, [], new AbortController().signal)
+      const execution = await commands.execute(this.driver.agent!, line, [], new AbortController().signal)
       if (execution === undefined) {
-        this.driver.model.pushNotice(`· unknown command ${line.split(' ')[0]}`, 'error')
+        this.driver.model.pushNotice(t('notice.unknownCommand', { command: line.split(' ')[0] ?? line }), 'error')
         return true
       }
       const result = execution.result
       if (result.kind === 'error') {
-        this.driver.model.pushNotice(`· ${result.text.slice(0, 180)}`, 'error')
+        this.driver.model.pushNotice(t('notice.commandFailed', { message: result.text.slice(0, 180) }), 'error')
       } else if (result.text !== undefined && result.text !== '') {
         this.driver.model.pushNotice(`· ${result.text.slice(0, 400)}`)
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
-      this.driver.model.pushNotice(`· command failed: ${message.slice(0, 180)}`, 'error')
+      this.driver.model.pushNotice(t('notice.commandFailed', { message: message.slice(0, 180) }), 'error')
     }
     return true
   }
@@ -920,19 +943,22 @@ export class TuiApp {
       })
       return
     }
-    try {
-      if (steer) {
-        this.driver.steer(trimmed)
-        this.driver.model.pushNotice(`(steering: ${firstLineOf(trimmed)})`)
-      } else {
-        if (this.driver.running) this.driver.model.pushNotice(`(queued: ${firstLineOf(trimmed)})`)
-        this.driver.send(trimmed)
-      }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.log.debug(`submit failed: ${message}`)
-      this.driver.model.pushNotice(`· send failed: ${message.slice(0, 120)}`, 'error')
+    if (steer) {
+      this.driver.steer(trimmed)
+        .then(() => { this.driver.model.pushNotice(t('notice.steering', { text: firstLineOf(trimmed) })) })
+        .catch((error: unknown) => this.reportSubmitFailure(error))
+      return
     }
+    if (this.driver.running) this.driver.model.pushNotice(t('notice.queued', { text: firstLineOf(trimmed) }))
+    this.driver.send(trimmed)
+      .then(() => this.refreshCommandAutocomplete())
+      .catch((error: unknown) => this.reportSubmitFailure(error))
+  }
+
+  private reportSubmitFailure(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    this.log.debug(`submit failed: ${message}`)
+    this.driver.model.pushNotice(t('notice.sendFailed', { message: message.slice(0, 120) }), 'error')
   }
 
   private onShutdown: ((code: number) => void) | undefined
@@ -1022,7 +1048,13 @@ function truncate(text: string, max: number): string {
 /** The sessionQuery surface the picker uses (structural; see dsh-session-query). */
 interface SessionQueryLike {
   listSessions(signal?: AbortSignal): Promise<readonly {
-    header: { id: string, createdAt: number, cwd?: string | undefined }
+    header: {
+      id: string
+      createdAt: number
+      cwd?: string | undefined
+      /** Set for subagent child sessions; excluded from the picker. */
+      origin?: string | undefined
+    }
     live: boolean
   }[]>
   readTitleSnapshots(ids: readonly string[], signal?: AbortSignal): Promise<readonly unknown[]>
