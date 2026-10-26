@@ -124,7 +124,8 @@ function createItemComponent(item: TranscriptItem, context: ItemContext): Compon
   const { theme, markdownTheme } = context
   switch (item.kind) {
     case 'user':
-      return new Text(theme.user('❯ ') + item.text, 0, 0)
+      // OSC 133 prompt marker: enables Ctrl+Up/Down jumps between user turns.
+      return new MarkedPrompt(new Text(theme.user('❯ ') + item.text, 0, 0))
     case 'assistant': {
       const reasoning = item.reasoning === ''
         ? []
@@ -329,6 +330,22 @@ function lcsDiff(oldLines: string[], newLines: string[]): DiffOp[] {
     j += 1
   }
   return result
+}
+
+/** Prepends an invisible OSC 133 prompt-start marker to a component's first line. */
+class MarkedPrompt implements Component {
+  constructor(private readonly child: Component) {}
+
+  invalidate(): void {
+    this.child.invalidate()
+  }
+
+  render(width: number): string[] {
+    const lines = this.child.render(width)
+    if (lines.length === 0) return lines
+    // The marker is stripped for display and read by Ctrl+Up/Down prompt jumps.
+    return [`\x1b]133;A\x07${lines[0] ?? ''}`, ...lines.slice(1)]
+  }
 }
 
 /** Stacks child components vertically without layout semantics. */

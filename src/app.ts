@@ -553,9 +553,11 @@ export class TuiApp {
       const descriptors = commands.list(this.driver.agent)
       const items = [
         ...descriptors.map(descriptor => ({ name: descriptor.name, description: descriptor.description })),
-        { name: 'exit', description: 'quit the TUI' },
+        { name: 'exit', description: 'quit the TUI (alias: quit)' },
+        { name: 'quit', description: 'quit the TUI (alias: exit)' },
         { name: 'clear', description: 'clear the transcript view' },
-        { name: 'session', description: 'list stored sessions and switch to one' },
+        { name: 'session', description: 'list stored sessions and switch (alias: resume)' },
+        { name: 'resume', description: 'switch to a stored session (alias: session)' },
         { name: 'events', description: 'inspect raw session events' },
         { name: 'model', description: 'switch provider/model/effort' },
         { name: 'cwd', description: 'show or change the working directory' },
@@ -583,8 +585,10 @@ export class TuiApp {
     if (!line.startsWith('/')) return false
     const commands = this.ctx.get('commands')
     if (line === '/exit' || line === '/quit') {
-      // Routed through the normal quit path for clean teardown.
-      this.driver.model.pushNotice('· use ctrl+q to quit')
+      // Exactly Ctrl+Q's path: no notice first — a model change here would
+      // invalidate the transcript render cache right before the exit
+      // print-back forces a full re-render (slow exit, long exposed window).
+      this.finishApp?.(0)
       return true
     }
     if (line === '/clear') {
@@ -592,7 +596,7 @@ export class TuiApp {
       this.driver.model.pushNotice('· view cleared (session history intact)')
       return true
     }
-    if (line === '/session' || line === '/sessions') {
+    if (line === '/session' || line === '/sessions' || line === '/resume') {
       await this.pickSession()
       return true
     }
@@ -762,8 +766,10 @@ export class TuiApp {
     const finish = (code: number): void => {
       if (settled) return
       settled = true
+      this.finishApp = undefined
       void this.shutdown(code)
     }
+    this.finishApp = finish
 
     // Global keys run before the focused editor.
     let lastInterrupt = 0
@@ -866,6 +872,8 @@ export class TuiApp {
   }
 
   private onShutdown: ((code: number) => void) | undefined
+  /** Quit request callable shared with command dispatch (/exit, /quit). */
+  private finishApp: ((code: number) => void) | undefined
 
   private async shutdown(code: number): Promise<void> {
     this.log.debug(`shutdown: begin (code ${String(code)})`)
@@ -1035,7 +1043,9 @@ function samePath(left: string, right: string): boolean {
  * roots in pi-tui 1.3.0; see docs/render-decision.md).
  */
 function printTranscriptForScrollback(transcript: TranscriptView): void {
-  const width = Math.max(40, Math.min(160, process.stdout.columns ?? 80))
+  // Match the layout render width exactly (the terminal width) so the exit
+  // print hits the view's render cache instead of forcing a full re-render.
+  const width = Math.max(40, Math.min(1000, process.stdout.columns ?? 80))
   const lines = transcript.render(width)
   if (lines.length === 0) return
   process.stdout.write(`\n${lines.join('\n')}\n`)

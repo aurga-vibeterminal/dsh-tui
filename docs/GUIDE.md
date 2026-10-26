@@ -35,6 +35,10 @@ The profile composes `dsh-base` plus the TUI bundle; sessions are stored per wor
 | `Shift+Enter` / `Ctrl+Enter` | New line |
 | `↑` / `↓` | Input history (empty editor) / cursor movement |
 | `Esc` | Interrupt the running turn |
+| `PgUp` / `PgDn` | Scroll the transcript one page |
+| `Ctrl+Home` / `Ctrl+End` | Jump to the top / bottom of the transcript |
+| `Ctrl+Up` / `Ctrl+Down` | Jump to the previous / next user prompt |
+| Mouse wheel | Scroll the transcript |
 | `Ctrl+C` | Interrupt; press twice to quit |
 | `Ctrl+Q` | Quit (restores the screen and prints the transcript into scrollback) |
 | `Ctrl+O` | Toggle the newest tool card's detail view (diff / file read / terminal output / search list) |
@@ -51,7 +55,7 @@ TUI-local commands (always available):
 | Command | Action |
 |---|---|
 | `/permission` | Permission-preset picker (`workspace-write`, `read-only`, `danger-full-access`) |
-| `/session` | List this directory's stored sessions; pick one to switch to |
+| `/session` | List this directory's stored sessions; pick one to switch to (alias `/resume`) |
 | `/fork` | Fork the current session and switch onto the branch |
 | `/model` | Provider / model / reasoning-effort picker (hot-switch, applies to the next step) |
 | `/cwd [path]` | Show or change the session working directory |
@@ -62,7 +66,7 @@ TUI-local commands (always available):
 | `/export [path]` | Export the transcript as Markdown |
 | `/events` | Raw session-event inspector |
 | `/clear` | Clear the transcript view (history intact) |
-| `/exit` | Reminder to use `Ctrl+Q` |
+| `/exit`, `/quit` | Quit (same as `Ctrl+Q`) |
 
 Commands registered by the runtime profile (e.g. from plugins) are dispatched through the same slash pipeline, so anything dsh registers is available too.
 
@@ -108,5 +112,6 @@ There is no user-side todo editing; ask the agent to add, reorder, or complete i
 | Stray log text on screen (browsers, GUI apps write to the console) | `Ctrl+L` full repaint |
 | `no API key for provider route "deepseek-official"` | Use the account route (`/model`, pick `deepseek-account/...`) or store an API key (`DEEPSEEK_API_KEY`, or the web UI's Models page) |
 | `@` file search shows nothing | Put a space before `@`; if files still miss, install `fd` |
+| Mouse wheel behaves like ↑/↓ (input history) | Your terminal does not implement SGR mouse reporting (DEC modes 1000/1002/1006); it falls back to sending arrow keys. Use `PgUp`/`PgDn` or a terminal with mouse support |
 | Something looks frozen | `Ctrl+L`; check the debug log (`DSH_TUI_LOG=path`) |
 | Need raw protocol evidence | `/events` |
