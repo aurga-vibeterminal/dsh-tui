@@ -81,6 +81,8 @@ export interface AgentDriver {
   forkCurrent(): Promise<string>
   /** Interrupt the running turn, keeping queued input. */
   cancel(): void
+  /** Observe running/idle flips (fires on every change; returns its disposer). */
+  onStatus(listener: (running: boolean) => void): () => void
   /** Stop feeding the model; resolves after subscriptions are dropped. */
   stop(): void
   /** Stop feeding and retire the agent entirely (session switch). */
@@ -146,6 +148,7 @@ export async function createDriver(
 
   const fs = ctx.get('fs')
   const cwd = fs === undefined ? process.cwd() : fs.processPath(await fs.resolve('.'))
+  const statusListeners: Array<(running: boolean) => void> = []
 
   let selectionRef: ModelSelectionRef | undefined
   let handle: { agent: Agent, dispose(): Promise<void> } | undefined
@@ -169,7 +172,10 @@ export async function createDriver(
     }
     stoppers.push(
       ctx.on('agent/status', ({ agent: subject, status }) => {
-        if (subject === wired) running = status === 'running'
+        if (subject === wired) {
+          running = status === 'running'
+          for (const callback of statusListeners) callback(running)
+        }
       }),
       ctx.on('agent/error', ({ agent: subject, error }) => {
         if (subject === wired) {
@@ -326,6 +332,16 @@ export async function createDriver(
     },
     cancel(): void {
       agent?.cancel({ kind: 'user' }, { keepInbox: true })
+    },
+    /** Observe running/idle flips (fires on every change; returns its disposer). */
+    onStatus(listener: (running: boolean) => void): () => void {
+      statusListeners.push(listener)
+      // Late subscribers get the current state immediately.
+      listener(running)
+      return () => {
+        const index = statusListeners.indexOf(listener)
+        if (index >= 0) statusListeners.splice(index, 1)
+      }
     },
     stop(): void {
       for (const stop of stoppers.splice(0)) stop()

@@ -875,6 +875,17 @@ export class TuiApp {
         this.tui.requestRender()
       }, 'render')
     }))
+    // Running/idle flips are NOT model events: without this hook the header
+    // spinner keeps animating (and emitting output) after the turn ended.
+    this.disposers.push(this.driver.onStatus((running) => {
+      guard(() => {
+        // ConEmu-style progress state so terminals (and vterm's addons) can
+        // report busy/idle: state 1 = indeterminate, 0 = clear.
+        process.stdout.write(running ? '\x1b]9;4;1;0\x07' : '\x1b]9;4;0;0\x07')
+        render()
+        this.tui.requestRender()
+      }, 'status-render')
+    }))
     render()
   }
 
@@ -1045,6 +1056,10 @@ export class TuiApp {
           timer.unref()
         }),
       ])
+    })
+    await step('clear-progress', () => {
+      // Clear the ConEmu progress state on exit so the tab never stays "busy".
+      process.stdout.write('\x1b]9;4;0;0\x07')
     })
     this.log.debug('shutdown: complete')
     this.onShutdown?.(code)
