@@ -14,11 +14,14 @@ An opencode-style fullscreen terminal console for [DeepSeek Harness](https://git
 
 ## Install & launch
 
+`@vterminal/dsh-tui` is **not yet on npm** — install from a local checkout or a git URL:
+
 ```sh
-dsh plugin --profile tui add dsh-tui   # once per machine (or a local path while developing)
-dsh tui                                 # shorthand for dsh --profile tui
-dsh tui --resume session-xxxx           # continue a stored session
-dsh tui --model deepseek-account/deepseek-v4-flash   # explicit model route
+dsh plugin --profile tui add D:\path\to\dsh-tui   # local path
+dsh plugin --profile tui add github:<org>/dsh-tui # git source
+dsh tui                                            # shorthand for dsh --profile tui
+dsh tui --resume session-xxxx                      # continue a stored session
+dsh tui --model deepseek-account/deepseek-v4-flash # explicit model route
 ```
 
 The profile composes `dsh-base` plus the TUI bundle; sessions are stored per working directory under your Harness home (`~/.dsh` by default).

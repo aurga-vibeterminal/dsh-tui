@@ -146,7 +146,7 @@ export class TuiApp {
 
     const header = new StatusLine(() => {
       tui.requestRender()
-    })
+    }, 120, process.env.DSH_TUI_NO_SPINNER === '1' ? ['·'] : undefined)
     const transcript = new TranscriptView(model.items, itemContext)
     const hints = new LineText('', 1)
     const editor = new Editor(tui, {

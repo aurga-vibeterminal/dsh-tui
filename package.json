@@ -1,9 +1,12 @@
 {
-  "name": "dsh-tui",
+  "name": "@vterminal/dsh-tui",
   "version": "0.1.0",
   "description": "Terminal UI bundle (addon) for DeepSeek Harness: opencode-style fullscreen agent console",
   "type": "module",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
@@ -28,7 +31,8 @@
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "record": "node tools/record.mjs"
+    "record": "node tools/record.mjs",
+    "prepare": "tsdown"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "1.3.0",
