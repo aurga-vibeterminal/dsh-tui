@@ -22,6 +22,7 @@ import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import type { AssistantStreamFrameLike, ToolPresenter, TranscriptModel } from './events.ts'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
+import { t } from './i18n.ts'
 
 /** Route override from the command line; absent keeps the profile default. */
 export interface DriverModelRoute {
@@ -202,7 +203,7 @@ export async function createDriver(
   // Subagent lifecycle: this runtime drives exactly our conversation tree, so
   // every child delegation belongs to it.
   const stopSubagentStart = ctx.on('subagent/start', (info) => {
-    model.pushNotice(`· subagent started (${info.provider})`)
+    model.pushNotice(t('notice.subagentStarted', { provider: info.provider }))
   })
   const stopSubagentEnd = ctx.on('subagent/end', (info) => {
     const text = info.lastAssistantMessage
@@ -211,7 +212,7 @@ export async function createDriver(
       .join('')
       .trim() ?? ''
     const preview = text === '' ? '' : `: ${text.slice(0, 100)}`
-    model.pushNotice(`· subagent finished (${String(info.stopReason)})${preview}`)
+    model.pushNotice(t('notice.subagentFinished', { reason: String(info.stopReason), preview }))
   })
 
   return {

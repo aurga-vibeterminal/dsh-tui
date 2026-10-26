@@ -63,6 +63,7 @@ TUI-local commands (always available):
 | `/todo` | Show the agent's current todo list |
 | `/expand` | Toggle all tool detail cards |
 | `/theme [name]` | Color theme picker (`dark`, `light`) |
+| `/language [code]` | UI language picker — **English / 中文**（默认跟随系统语言；运行时即时切换） |
 | `/export [path]` | Export the transcript as Markdown |
 | `/events` | Raw session-event inspector |
 | `/clear` | Clear the transcript view (history intact) |

@@ -23,6 +23,7 @@ import type {
   AskUserQuestionItem,
 } from '@deepseek-ai/dsh-user-questions/types'
 import type { Theme } from './theme.ts'
+import { t } from './i18n.ts'
 
 /** Present the localized display reason best matching the environment. */
 function displayReasonOf(reasons: { en: string, readonly [locale: string]: string } | undefined, fallback: string | undefined): string {
@@ -63,12 +64,12 @@ export class ApprovalDialog implements Component {
   render(width: number): string[] {
     if (this.cacheLines !== undefined && this.cacheWidth === width) return this.cacheLines
     const reason = displayReasonOf(this.request.displayReason, this.request.reason)
-    const head = this.theme.warning(`⚠ approve ${this.request.toolName}`)
+    const head = this.theme.warning(t('approval.title', { tool: this.request.toolName }))
     const lines = [truncateToWidth(` ${head}`, width)]
     if (reason !== '') {
       lines.push(truncateToWidth(this.theme.dim(`  ${reason}`), width))
     }
-    lines.push(truncateToWidth(this.theme.dim('  y allow once · n or esc reject · ctrl+c cancel'), width))
+    lines.push(truncateToWidth(this.theme.dim(t('approval.hint')), width))
     this.cacheWidth = width
     this.cacheLines = lines
     return lines
@@ -158,11 +159,11 @@ export class QuestionDialog implements Component {
         lines.push(truncateToWidth(`${prefix}${mark}${label}`, width))
       }
       const navigation = this.states.length > 1
-        ? ` · tab question ${String(this.index + 1)}/${String(this.states.length)}`
+        ? t('question.nav', { index: String(this.index + 1), total: String(this.states.length) })
         : ''
       const hints = active.question.multiSelect === true
-        ? `  space toggle · enter submit${navigation} · esc cancel`
-        : `  enter select${navigation} · esc cancel`
+        ? t('question.hintMulti', { nav: navigation })
+        : t('question.hintSingle', { nav: navigation })
       lines.push(truncateToWidth(this.theme.dim(hints), width))
     }
     this.cacheWidth = width
@@ -264,7 +265,7 @@ export class ListDialog implements Component {
     if (this.cacheLines !== undefined && this.cacheWidth === width) return this.cacheLines
     const lines = [truncateToWidth(this.theme.accent(` ${this.title}`), width)]
     for (const row of this.rows) lines.push(truncateToWidth(row, width))
-    lines.push(truncateToWidth(this.theme.dim(' esc close'), width))
+    lines.push(truncateToWidth(this.theme.dim(t('dialog.closeHint')), width))
     this.cacheWidth = width
     this.cacheLines = lines
     return lines
@@ -305,12 +306,12 @@ export class EventsDialog implements Component {
 
   render(width: number): string[] {
     if (this.cacheLines !== undefined && this.cacheWidth === width) return this.cacheLines
-    const lines = [truncateToWidth(this.theme.accent(` raw events (last ${String(Math.min(this.maxLines, this.records.length))} of ${String(this.records.length)})`), width)]
+    const lines = [truncateToWidth(this.theme.accent(` ${t('events.title', { shown: String(Math.min(this.maxLines, this.records.length)), total: String(this.records.length) })}`), width)]
     const start = Math.max(0, this.records.length - this.maxLines)
     for (const record of this.records.slice(start)) {
       lines.push(truncateToWidth(this.theme.dim(` ${String(record.seq).padStart(4, ' ')} ${record.type} ${record.summary}`), width))
     }
-    lines.push(truncateToWidth(this.theme.dim(' esc close'), width))
+    lines.push(truncateToWidth(this.theme.dim(t('dialog.closeHint')), width))
     this.cacheWidth = width
     this.cacheLines = lines
     return lines

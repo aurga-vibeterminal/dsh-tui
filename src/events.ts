@@ -14,6 +14,7 @@
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
+import { t } from './i18n.ts'
 
 /**
  * Reconstructs tool render-intent views for the fold. Implemented over
@@ -232,7 +233,7 @@ export class TranscriptModel {
         this.items.splice(state.itemIndex, 1, {
           kind: 'notice',
           id: item.id,
-          text: '· attempt discarded',
+          text: t('transcript.attemptDiscarded'),
           tone: 'dim',
         })
       }
@@ -259,7 +260,7 @@ export class TranscriptModel {
       this.items.push({
         kind: 'notice',
         id: localId('preset'),
-        text: `· permission → ${this.preset}`,
+        text: t('notice.permissionChange', { preset: this.preset }),
         tone: 'dim',
       })
       this.changed()
@@ -275,7 +276,7 @@ export class TranscriptModel {
       const model = data.selection?.model ?? data.model
       if (typeof provider === 'string' && typeof model === 'string') {
         this.model = `${provider}/${model}`
-        this.items.push({ kind: 'notice', id: localId('model'), text: `· model → ${this.model}`, tone: 'dim' })
+        this.items.push({ kind: 'notice', id: localId('model'), text: t('notice.modelChange', { model: this.model }), tone: 'dim' })
         this.changed()
       }
       return
@@ -283,7 +284,7 @@ export class TranscriptModel {
     if (type === 'working-directory/change') {
       const cwd = (event as unknown as { data: { cwd?: string } }).data.cwd
       if (typeof cwd === 'string' && cwd !== '') {
-        this.items.push({ kind: 'notice', id: localId('cwd'), text: `· cwd → ${cwd}`, tone: 'dim' })
+        this.items.push({ kind: 'notice', id: localId('cwd'), text: t('notice.cwdChange', { cwd }), tone: 'dim' })
         this.changed()
       }
       return
@@ -298,7 +299,7 @@ export class TranscriptModel {
         this.items.push({
           kind: 'notice',
           id: localId('todo'),
-          text: `· todos ${String(done)}/${String(this.todos.length)} done (/todo)`,
+          text: t('notice.todos', { done: String(done), total: String(this.todos.length) }),
           tone: 'dim',
         })
         this.changed()
@@ -306,12 +307,12 @@ export class TranscriptModel {
       return
     }
     if (type === 'compaction/start') {
-      this.items.push({ kind: 'notice', id: localId('compaction'), text: '· compacting context…', tone: 'dim' })
+      this.items.push({ kind: 'notice', id: localId('compaction'), text: t('notice.compacting'), tone: 'dim' })
       this.changed()
       return
     }
     if (type === 'compaction/end') {
-      this.items.push({ kind: 'notice', id: localId('compaction'), text: '· context compacted', tone: 'dim' })
+      this.items.push({ kind: 'notice', id: localId('compaction'), text: t('notice.compacted'), tone: 'dim' })
       this.changed()
       return
     }
@@ -405,9 +406,11 @@ export class TranscriptModel {
       case 'turn/end': {
         if (event.data.reason.kind !== 'completed') {
           const detail = event.data.reason.kind === 'error'
-            ? `: ${(event.data.reason as { error: { message: string } }).error.message}`
+            ? (event.data.reason as { error: { message: string } }).error.message
             : ''
-          const text = `· turn ${event.data.reason.kind}${detail}`
+          const text = event.data.reason.kind === 'error'
+            ? t('transcript.turnError', { message: detail })
+            : t('transcript.turnEnd', { reason: event.data.reason.kind })
           this.items.push({
             kind: 'notice',
             id: localId('turn'),
@@ -418,7 +421,7 @@ export class TranscriptModel {
         break
       }
       case 'assistant/attempt': {
-        this.items.push({ kind: 'notice', id: localId('attempt'), text: '· attempt discarded', tone: 'dim' })
+        this.items.push({ kind: 'notice', id: localId('attempt'), text: t('transcript.attemptDiscarded'), tone: 'dim' })
         break
       }
       case 'turn/start':

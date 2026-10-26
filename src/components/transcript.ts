@@ -16,6 +16,7 @@ import {
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 import type { Theme } from '../theme.ts'
 import type { TranscriptItem } from '../events.ts'
+import { t } from '../i18n.ts'
 
 /** Rendering dependencies shared by all item renderers. */
 export interface ItemContext {
@@ -129,9 +130,9 @@ function createItemComponent(item: TranscriptItem, context: ItemContext): Compon
     case 'assistant': {
       const reasoning = item.reasoning === ''
         ? []
-        : [theme.dim(`· ${item.live ? 'thinking… ' : ''}${firstLine(item.reasoning, 72)}`)]
+        : [theme.dim(`· ${item.live ? t('transcript.thinking') : ''}${firstLine(item.reasoning, 72)}`)]
       if (item.text === '') {
-        return new Text(reasoning.length > 0 ? reasoning.join('\n') : (item.live ? theme.dim('…') : ''), 0, 0)
+        return new Text(reasoning.length > 0 ? reasoning.join('\n') : (item.live ? theme.dim(t('transcript.pending')) : ''), 0, 0)
       }
       if (reasoning.length === 0) return new Markdown(item.text, 0, 0, markdownTheme)
       return new Compound([

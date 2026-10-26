@@ -45,6 +45,7 @@ import { StatusLine } from './components/status-line.ts'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import { THEME_NAMES, markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
 import { writeFile } from 'node:fs/promises'
+import { availableLocales, initSystemLocale, knownLocales, locale, setLocale, t } from './i18n.ts'
 import { createDebugLogger, StderrCapture, type Logger } from './util/log.ts'
 import packageInfo from '../package.json'
 
@@ -133,6 +134,7 @@ export class TuiApp {
    * layout, then input handling.
    */
   static async create(ctx: Context, options: AppOptions): Promise<TuiApp> {
+    initSystemLocale()
     const theme = themeByName(options.theme)
     const log = createDebugLogger()
     const model = new TranscriptModel(createToolPresenter(ctx))
@@ -197,7 +199,7 @@ export class TuiApp {
       return { label }
     })
     const dialog = new QuestionDialog({
-      questions: [{ id: 'inbox', question: 'Remove pending input', options }],
+      questions: [{ id: 'inbox', question: t('dialog.inboxTitle'), options }],
     }, this.theme)
     const answer = await this.showDialog(dialog)
     const selected = answer.answers[0]?.selected[0]
@@ -257,7 +259,7 @@ export class TuiApp {
     const dialog = new QuestionDialog({
       questions: [{
         id: 'theme',
-        question: 'Theme',
+        question: t('dialog.themeTitle'),
         options: THEME_NAMES.map(name => ({ label: name })),
       }],
     }, this.theme)
@@ -318,6 +320,45 @@ export class TuiApp {
     model.pushNotice(`· copied ${String(target.text.length)} chars (${preview}…)`)
   }
 
+  /** Language picker: every known locale; reserved ones answer honestly. */
+  private async pickLanguage(argument: string): Promise<void> {
+    if (argument !== '') {
+      this.applyLanguage(argument)
+      return
+    }
+    const current = locale()
+    const dialog = new QuestionDialog({
+      questions: [{
+        id: 'language',
+        question: t('dialog.languageTitle'),
+        options: knownLocales().map(entry => ({
+          label: `${entry.id === current ? '● ' : ''}${entry.label}`,
+          ...(entry.available
+            ? {}
+            : { description: t('dialog.reservedHint') }),
+        })),
+      }],
+    }, this.theme)
+    const answer = await this.showDialog(dialog)
+    const selected = answer.answers[0]?.selected[0]
+    if (selected === undefined) {
+      this.driver.model.pushNotice(t('notice.langCancelled'))
+      return
+    }
+    const entry = knownLocales().find(candidate => `${candidate.id === current ? '● ' : ''}${candidate.label}` === selected)
+    if (entry !== undefined) this.applyLanguage(entry.id)
+  }
+
+  private applyLanguage(name: string): void {
+    const label = availableLocales().find(entry => entry.id === name)?.label ?? name
+    if (setLocale(name)) {
+      this.driver.model.pushNotice(t('notice.langChanged', { name: label }))
+      return
+    }
+    // Reserved but untranslated (zh, ja): architecture ready, table pending.
+    this.driver.model.pushNotice(t('notice.langUnavailable', { name: label, fallback: 'English' }))
+  }
+
   /** Overlay picker over the llm catalog; applies the switch to the next step. */
   private async pickModel(): Promise<void> {
     const llm = this.ctx.get('llm')
@@ -357,7 +398,7 @@ export class TuiApp {
       }
     })
     const dialog = new QuestionDialog({
-      questions: [{ id: 'model', question: `Model (current: ${truncate(currentRoute, 44)})`, options }],
+      questions: [{ id: 'model', question: t('dialog.modelTitle', { route: truncate(currentRoute, 44) }), options }],
     }, this.theme)
     const answer = await this.showDialog(dialog)
     const chosenLabel = answer.answers[0]?.selected[0]
@@ -374,7 +415,7 @@ export class TuiApp {
       const effortDialog = new QuestionDialog({
         questions: [{
           id: 'effort',
-          question: `Reasoning effort for ${chosen.id}`,
+          question: t('dialog.effortTitle', { model: chosen.id }),
           options: chosen.efforts.map(candidate => ({
             label: candidate.name === '' ? candidate.id : candidate.name,
             description: candidate.id,
@@ -469,7 +510,7 @@ export class TuiApp {
     })
 
     const dialog = new QuestionDialog({
-      questions: [{ id: 'session', question: `Switch to session (${truncate(workspace, 40)})`, options }],
+      questions: [{ id: 'session', question: t('dialog.sessionTitle', { workspace: truncate(workspace, 40) }), options }],
     }, this.theme)
     const answer = await this.showDialog(dialog)
     const selected = answer.answers[0]?.selected[0]
@@ -527,7 +568,7 @@ export class TuiApp {
     const dialog = new QuestionDialog({
       questions: [{
         id: 'preset',
-        question: `Permission preset (current: ${current})`,
+        question: t('dialog.permissionTitle', { preset: current }),
         options: options.map(option => ({
           label: option.name,
           ...(option.description === undefined ? {} : { description: option.description }),
@@ -576,6 +617,7 @@ export class TuiApp {
         { name: 'expand', description: 'toggle all tool detail cards' },
         { name: 'todo', description: 'show the current todo list' },
         { name: 'theme', description: 'switch color theme (dark/light)' },
+        { name: 'language', description: 'switch UI language' },
         { name: 'export', description: 'export the transcript as Markdown' },
         { name: 'copy', description: 'copy an assistant reply to the clipboard' },
       ]
@@ -625,6 +667,18 @@ export class TuiApp {
     }
     if (line === '/theme' || line.startsWith('/theme ')) {
       await this.pickTheme(line.slice(6).trim())
+      return true
+    }
+    if (line === '/language' || line === '/lang') {
+      await this.pickLanguage('')
+      return true
+    }
+    if (line.startsWith('/language ')) {
+      await this.pickLanguage(line.slice(10).trim())
+      return true
+    }
+    if (line.startsWith('/lang ')) {
+      await this.pickLanguage(line.slice(5).trim())
       return true
     }
     if (line === '/export' || line.startsWith('/export ')) {
@@ -947,11 +1001,11 @@ function firstLineOf(text: string): string {
 
 function headerLine(model: TranscriptModel, theme: Theme): string {
   const project = basename(process.cwd())
-  const title = model.title === undefined ? 'new session' : truncate(model.title, 24)
+  const title = model.title === undefined ? t('header.newSession') : truncate(model.title, 24)
   const preset = model.preset === undefined ? '' : ` · ${model.preset}`
   const modelRoute = truncate(model.model ?? '', 28)
   const modelSegment = modelRoute === '' ? '' : ` · ${modelRoute}`
-  const tokens = `${model.inputTokens + model.outputTokens} tok`
+  const tokens = `${model.inputTokens + model.outputTokens}${t('header.tokens')}`
   return theme.dim(` ${project} · ${title}${preset}${modelSegment} · ${tokens}`)
 }
 
@@ -1023,9 +1077,9 @@ function renderTranscriptMarkdown(model: TranscriptModel, sessionId: string): st
 /** Startup banner: version, current route, developer contact, first hints. */
 function pushWelcome(model: TranscriptModel, driver: AgentDriver): void {
   const version: string = packageInfo.version
-  model.pushNotice(`dsh-tui v${version} · opencode-style console for DeepSeek Harness`)
-  model.pushNotice(`model ${driver.route.provider}/${driver.route.model} · type / for commands · ctrl+q quit`)
-  model.pushNotice('development & feedback: dev@vterminal.dev')
+  model.pushNotice(t('welcome.title', { version }))
+  model.pushNotice(t('welcome.line', { route: `${driver.route.provider}/${driver.route.model}` }))
+  model.pushNotice(t('welcome.contact'))
 }
 
 /** Compact relative time for the session picker. */
