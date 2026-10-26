@@ -305,6 +305,16 @@ export class TranscriptModel {
       }
       return
     }
+    if (type === 'compaction/start') {
+      this.items.push({ kind: 'notice', id: localId('compaction'), text: '· compacting context…', tone: 'dim' })
+      this.changed()
+      return
+    }
+    if (type === 'compaction/end') {
+      this.items.push({ kind: 'notice', id: localId('compaction'), text: '· context compacted', tone: 'dim' })
+      this.changed()
+      return
+    }
     switch (event.type) {
       case 'user/message': {
         // Only genuine human turns render; runtime context, skill catalogs,

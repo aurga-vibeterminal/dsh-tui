@@ -37,7 +37,7 @@ import {
 import type {} from '@deepseek-ai/dsh-commands'
 import { createDriver, createToolPresenter, type AgentDriver, type DriverModelRoute } from './agent-driver.ts'
 import { fuzzyFileItems, resolveFdPath } from './components/file-search.ts'
-import { TranscriptModel } from './events.ts'
+import { TranscriptModel, type TranscriptItem } from './events.ts'
 import { TranscriptView, type ItemContext } from './components/transcript.ts'
 import { LineText } from './components/line-text.ts'
 import { ApprovalDialog, EventsDialog, ListDialog, QuestionDialog } from './dialogs.ts'
@@ -287,6 +287,25 @@ export class TuiApp {
       const message = error instanceof Error ? error.message : String(error)
       this.driver.model.pushNotice(`· export failed: ${message.slice(0, 140)}`, 'error')
     }
+  }
+
+  /** Copy the n-th latest assistant text (default: latest) to the clipboard. */
+  private copyAssistantText(argument: string): void {
+    const model = this.driver.model
+    const messages = model.items.filter(item => item.kind === 'assistant' && !item.live && item.text !== '') as Extract<TranscriptItem, { kind: 'assistant' }>[]
+    if (messages.length === 0) {
+      model.pushNotice('· nothing to copy yet')
+      return
+    }
+    const index = argument === '' ? messages.length - 1 : messages.length - 1 - (Number.parseInt(argument, 10) || 0)
+    const target = index >= 0 && index < messages.length ? messages[index] : undefined
+    if (target === undefined) {
+      model.pushNotice(`· /copy: only ${String(messages.length)} assistant message(s)`)
+      return
+    }
+    osc52Copy(target.text)
+    const preview = target.text.slice(0, 40).replace(/\n/g, ' ')
+    model.pushNotice(`· copied ${String(target.text.length)} chars (${preview}…)`)
   }
 
   /** Overlay picker over the llm catalog; applies the switch to the next step. */
@@ -546,6 +565,7 @@ export class TuiApp {
         { name: 'todo', description: 'show the current todo list' },
         { name: 'theme', description: 'switch color theme (dark/light)' },
         { name: 'export', description: 'export the transcript as Markdown' },
+        { name: 'copy', description: 'copy an assistant reply to the clipboard' },
       ]
       const fdPath = resolveFdPath()
       this.editor.setAutocompleteProvider(new ComposerAutocomplete(
@@ -595,6 +615,10 @@ export class TuiApp {
     }
     if (line === '/export' || line.startsWith('/export ')) {
       await this.exportTranscript(line.slice(7).trim())
+      return true
+    }
+    if (line === '/copy' || line.startsWith('/copy ')) {
+      this.copyAssistantText(line.slice(5).trim())
       return true
     }
     if (line === '/model' || line === '/models') {
@@ -930,6 +954,13 @@ interface SessionQueryLike {
     live: boolean
   }[]>
   readTitleSnapshots(ids: readonly string[], signal?: AbortSignal): Promise<readonly unknown[]>
+}
+
+/** Copy helper: the n-th latest assistant text via OSC 52 clipboard write. */
+function osc52Copy(text: string): void {
+  const payload = Buffer.from(text, 'utf8').toString('base64')
+  // Terminals without OSC 52 support ignore the sequence silently.
+  process.stdout.write(`\x1b]52;c;${payload}\x07`)
 }
 
 /** Markdown export of one transcript. */
