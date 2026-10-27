@@ -574,10 +574,35 @@ export class TuiApp {
     }
     // Scope to this workspace and hide subagent child sessions (origin=subagent);
     // user-created fork branches stay visible.
-    const records = (await query.listSessions()).filter(record =>
+    let records = (await query.listSessions()).filter(record =>
       record.header.cwd !== undefined
       && samePath(record.header.cwd, process.cwd())
       && record.header.origin !== 'subagent')
+    // Archived sessions stay out: archive membership lives in the workspace
+    // registry (the same state the web UI's archive button writes).
+    const workspaceRegistry = this.ctx.get('workspaceRegistry') as { archivedSessionIds?: readonly string[] } | undefined
+    if (workspaceRegistry !== undefined) {
+      const archived = new Set<string>(workspaceRegistry.archivedSessionIds ?? [])
+      records = records.filter(record => !archived.has(String(record.header.id)))
+    }
+    // Blank sessions stay out too — the web pre-creates reusable blanks, and
+    // without this filter the picker fills with never-started shells. Blank
+    // follows the harness's own semantics: no turn ever started. The current
+    // session stays selectable even mid-first-turn.
+    const currentId = this.driver.hasAgent ? String(this.driver.session?.id ?? '') : ''
+    if (records.length > 0) {
+      const started = await Promise.all(records.map(async (record) => {
+        const id = String(record.header.id)
+        if (id === currentId) return true
+        try {
+          const events: readonly unknown[] = await query.listEvents(id)
+          return events.some(event => (event as { type?: string }).type === 'turn/start')
+        } catch {
+          return true // unreadable log: better visible than silently dropped
+        }
+      }))
+      records = records.filter((_, index) => started[index] === true)
+    }
     if (records.length === 0) {
       this.driver.model.pushNotice(`· no stored sessions in ${truncate(process.cwd(), 60)}`)
       return
@@ -597,7 +622,6 @@ export class TuiApp {
       // Titles are cosmetic; ids and times still identify the entries.
     }
 
-    const currentId = this.driver.hasAgent ? String(this.driver.session?.id ?? '') : ''
     const workspace = process.cwd()
     const options: { value: string, label: string, description?: string }[] = []
     records.forEach((record) => {
@@ -1203,6 +1227,8 @@ interface SessionQueryLike {
     }
     live: boolean
   }[]>
+  /** Full event log of one session; the picker reads it to detect blank sessions. */
+  listEvents(sessionId: string): Promise<readonly unknown[]>
   readTitleSnapshots(ids: readonly string[], signal?: AbortSignal): Promise<readonly unknown[]>
 }
 

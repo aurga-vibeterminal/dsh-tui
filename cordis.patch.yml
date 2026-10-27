@@ -2,7 +2,12 @@
 # Two-plugin app pattern (as dsh-headless / dsh-web-app): a startup provider
 # parses the app's flags from the launcher's argument snapshot and provides the
 # tuiStartup service; the runner injects it and owns the terminal.
+#
+# The workspace registry carries archive membership (the same state the web
+# UI's archive writes); the session picker hides archived sessions through it.
 - insert:
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
     - id: tui-startup
       name: '@vterminal/dsh-tui/startup'
     - id: tui-runner
