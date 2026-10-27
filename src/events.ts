@@ -14,7 +14,7 @@
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
-import { t } from './i18n.ts'
+import { permissionDisplayName, t } from './i18n.ts'
 
 /**
  * Reconstructs tool render-intent views for the fold. Implemented over
@@ -260,7 +260,7 @@ export class TranscriptModel {
       this.items.push({
         kind: 'notice',
         id: localId('preset'),
-        text: t('notice.permissionChange', { preset: this.preset }),
+        text: t('notice.permissionChange', { preset: permissionDisplayName(this.preset) }),
         tone: 'dim',
       })
       this.changed()

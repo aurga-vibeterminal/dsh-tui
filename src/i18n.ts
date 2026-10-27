@@ -105,10 +105,14 @@ const en = {
   'dialog.effortCancelled': '· effort picker cancelled; keeping the default',
   'dialog.sessionTitle': 'Switch to session ({workspace})',
   'dialog.permissionTitle': 'Permission preset (current: {preset})',
+  'permission.readOnly': 'Read Only',
+  'permission.workspaceWrite': 'Workspace Write',
+  'permission.fullAccess': 'Full access',
+  'permission.auto': 'Auto review',
   'dialog.inboxTitle': 'Remove pending input',
   'notice.modelCancelled': '· model picker cancelled',
   'notice.modelSwitchFailed': '· model switch failed: {message}',
-  'notice.modelStays': '· permission stays {name}',
+  'notice.permissionStays': '· permission stays {name}',
   'notice.permissionCatalogFailed': '· permission catalog failed: {message}',
   'notice.permissionCancelled': '· preset picker cancelled',
   'notice.inboxEmpty': '· inbox empty',
@@ -214,10 +218,14 @@ const tables: Record<Locale, Record<string, string>> = {
     'dialog.effortCancelled': '· 已取消力度选择，保留默认',
     'dialog.sessionTitle': '切换会话（{workspace}）',
     'dialog.permissionTitle': '权限预设（当前：{preset}）',
+    'permission.readOnly': '仅可查看',
+    'permission.workspaceWrite': '工作区内修改',
+    'permission.fullAccess': '完全权限',
+    'permission.auto': '自动审查',
     'dialog.inboxTitle': '移除待处理输入',
     'notice.modelCancelled': '· 已取消模型选择',
     'notice.modelSwitchFailed': '· 模型切换失败：{message}',
-    'notice.modelStays': '· 权限保持 {name}',
+    'notice.permissionStays': '· 权限保持 {name}',
     'notice.permissionCatalogFailed': '· 权限目录获取失败：{message}',
     'notice.permissionCancelled': '· 已取消预设选择',
     'notice.inboxEmpty': '· 收件箱为空',
@@ -313,4 +321,23 @@ export function resolveSystemLocale(): Locale {
 export function initSystemLocale(): Locale {
   current = resolveSystemLocale()
   return current
+}
+
+/** i18n keys carrying the web-parity label per well-known permission value. */
+const PERMISSION_LABEL_KEYS: Record<string, string> = {
+  'read-only': 'permission.readOnly',
+  'workspace-write': 'permission.workspaceWrite',
+  'danger-full-access': 'permission.fullAccess',
+  auto: 'permission.auto',
+}
+
+/**
+ * Display name for a permission preset value, matching the web client's
+ * labels ("Read Only" / "Workspace Write" / "Full access" / "Auto review",
+ * localized). Unknown or profile-configured custom values fall back to the
+ * catalog-provided name (or the raw value).
+ */
+export function permissionDisplayName(value: string, fallback: string = value): string {
+  const key = PERMISSION_LABEL_KEYS[value]
+  return key === undefined ? fallback : t(key)
 }

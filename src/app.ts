@@ -45,7 +45,7 @@ import { StatusLine } from './components/status-line.ts'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import { THEME_NAMES, markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
 import { writeFile } from 'node:fs/promises'
-import { availableLocales, initSystemLocale, knownLocales, locale, setLocale, t } from './i18n.ts'
+import { availableLocales, initSystemLocale, knownLocales, locale, permissionDisplayName, setLocale, t } from './i18n.ts'
 import { loadTuiSettings, saveTuiSettings, type TuiSettings } from './settings.ts'
 import { createDebugLogger, StderrCapture, type Logger } from './util/log.ts'
 import packageInfo from '../package.json'
@@ -669,22 +669,28 @@ export class TuiApp {
       return true
     }
     let current: string
-    let options: { value: string, name: string, description?: string }[]
+    let options: { value: string, label: string, description?: string }[]
     try {
       current = presets.current(this.driver.agent!.session)
       const catalog = presets.catalog()
-      options = catalog.options.filter(option => option.value !== 'custom')
+      options = catalog.options
+        .filter(option => option.value !== 'custom')
+        .map(option => ({
+          value: option.value,
+          label: permissionDisplayName(option.value, option.name),
+          ...(option.description === undefined ? {} : { description: option.description }),
+        }))
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
-      this.driver.model.pushNotice(`· permission catalog failed: ${message.slice(0, 140)}`, 'error')
+      this.driver.model.pushNotice(t('notice.permissionCatalogFailed', { message: message.slice(0, 140) }), 'error')
       return true
     }
     const dialog = new QuestionDialog({
       questions: [{
         id: 'preset',
-        question: t('dialog.permissionTitle', { preset: current }),
+        question: t('dialog.permissionTitle', { preset: permissionDisplayName(current) }),
         options: options.map(option => ({
-          label: option.name,
+          label: option.label,
           ...(option.description === undefined ? {} : { description: option.description }),
         })),
       }],
@@ -692,12 +698,12 @@ export class TuiApp {
     const answer = await this.showDialog(dialog)
     const label = answer.answers[0]?.selected[0]
     if (label === undefined) {
-      this.driver.model.pushNotice('· preset picker cancelled')
+      this.driver.model.pushNotice(t('notice.permissionCancelled'))
       return true
     }
-    const chosen = options.find(option => option.name === label)
+    const chosen = options.find(option => option.label === label)
     if (chosen === undefined || chosen.value === current) {
-      this.driver.model.pushNotice(`· permission stays ${current}`)
+      this.driver.model.pushNotice(t('notice.permissionStays', { name: permissionDisplayName(current) }))
       return true
     }
     return this.dispatchCommand(`/permission ${chosen.value}`)
@@ -1169,7 +1175,7 @@ function firstLineOf(text: string): string {
 function headerLine(model: TranscriptModel, theme: Theme): string {
   const project = basename(process.cwd())
   const title = model.title === undefined ? t('header.newSession') : truncate(model.title, 24)
-  const preset = model.preset === undefined ? '' : ` · ${model.preset}`
+  const preset = model.preset === undefined ? '' : ` · ${permissionDisplayName(model.preset)}`
   const modelRoute = truncate(model.model ?? '', 28)
   const modelSegment = modelRoute === '' ? '' : ` · ${modelRoute}`
   const tokens = `${model.inputTokens + model.outputTokens}${t('header.tokens')}`

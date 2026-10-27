@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { availableLocales, initSystemLocale, knownLocales, locale, missingKeys, resolveSystemLocale, setLocale, t } from '../src/i18n.ts'
+import { availableLocales, initSystemLocale, knownLocales, locale, missingKeys, permissionDisplayName, resolveSystemLocale, setLocale, t } from '../src/i18n.ts'
 
 describe('i18n', () => {
   it('interpolates params and leaves unknown placeholders intact', () => {
@@ -47,5 +47,24 @@ describe('i18n', () => {
     expect(t('approval.title', { tool: 'bash' })).toBe('⚠ 批准 bash')
     setLocale('en')
     expect(t('notice.compacted')).toBe('· context compacted')
+  })
+
+  it('labels well-known permission presets with the web-parity names', () => {
+    expect(setLocale('en')).toBe(true)
+    expect(permissionDisplayName('read-only')).toBe('Read Only')
+    expect(permissionDisplayName('workspace-write')).toBe('Workspace Write')
+    expect(permissionDisplayName('danger-full-access')).toBe('Full access')
+    expect(permissionDisplayName('auto')).toBe('Auto review')
+    expect(setLocale('zh')).toBe(true)
+    expect(permissionDisplayName('read-only')).toBe('仅可查看')
+    expect(permissionDisplayName('workspace-write')).toBe('工作区内修改')
+    expect(permissionDisplayName('danger-full-access')).toBe('完全权限')
+    expect(permissionDisplayName('auto')).toBe('自动审查')
+    setLocale('en')
+  })
+
+  it('falls back to the catalog name for unknown permission values', () => {
+    expect(permissionDisplayName('my-profile-preset', 'My Preset')).toBe('My Preset')
+    expect(permissionDisplayName('my-profile-preset')).toBe('my-profile-preset')
   })
 })

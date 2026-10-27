@@ -175,7 +175,8 @@ describe('TranscriptModel · notices and unknown events', () => {
     const model = new TranscriptModel()
     model.applyEvent({ type: 'permission/preset', seq: 1, time: 0, data: { preset: 'danger-full-access' } } as unknown as SessionEvent)
     expect(model.preset).toBe('danger-full-access')
-    expect(model.items.some(item => item.kind === 'notice' && item.text.includes('danger-full-access'))).toBe(true)
+    // The notice shows the web-parity display name, not the raw value.
+    expect(model.items.some(item => item.kind === 'notice' && item.text.includes('Full access'))).toBe(true)
     expect(model.status.preset).toBe('danger-full-access')
   })
 
