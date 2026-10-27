@@ -4,7 +4,7 @@ import { availableLocales, initSystemLocale, knownLocales, locale, missingKeys, 
 describe('i18n', () => {
   it('interpolates params and leaves unknown placeholders intact', () => {
     expect(t('notice.todos', { done: '2', total: '5' })).toBe('· todos 2/5 done (/todo)')
-    expect(t('welcome.title', { version: '9.9.9' })).toContain('v9.9.9')
+    expect(t('welcome.version', { version: '9.9.9' })).toContain('v9.9.9')
     expect(t('notice.cwdChange')).toBe('· cwd → {cwd}')
     expect(t('notice.presetChange', { preset: 'ptc' })).toContain('ptc')
   })

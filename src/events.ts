@@ -58,6 +58,7 @@ export type TranscriptItem =
   | { kind: 'assistant'; id: string; live: boolean; text: string; reasoning: string; usage: AssistantUsage | undefined }
   | { kind: 'tool'; id: string; callId: string; live: boolean; name: string; argDigest: string; rawArgs: string; status: ToolStatus; resultDigest: string | undefined; callView: ToolCallView | undefined; resultView: ToolResultView | undefined; expanded: boolean }
   | { kind: 'notice'; id: string; text: string; tone: 'dim' | 'error' }
+  | { kind: 'banner'; id: string; version: string; title: string; subtitle: string; info: string }
 
 /** One raw event kept for the /events inspector. */
 export interface RecentEventRecord {
@@ -177,6 +178,12 @@ export class TranscriptModel {
     const index = this.items.length
     this.items.push({ kind: 'notice', id: localId('notice'), text, tone })
     if (tone === 'dim' && text.startsWith('(queued')) this.queuedNotices.push(index)
+    this.changed()
+  }
+
+  /** Startup banner: whale logo plus the version/title/subtitle block (local, non-durable). */
+  pushBanner(version: string, title: string, subtitle: string, info: string): void {
+    this.items.push({ kind: 'banner', id: localId('banner'), version, title, subtitle, info })
     this.changed()
   }
 

@@ -39,6 +39,7 @@ import { createDriver, createToolPresenter, type AgentDriver, type DriverModelRo
 import { fuzzyFileItems, resolveFdPath } from './components/file-search.ts'
 import { TranscriptModel, type TranscriptItem } from './events.ts'
 import { TranscriptView, type ItemContext } from './components/transcript.ts'
+import { LOGO_ROWS } from './logo-cells.ts'
 import { LineText } from './components/line-text.ts'
 import { ApprovalDialog, EventsDialog, ListDialog, PickerDialog, QuestionDialog } from './dialogs.ts'
 import { StatusLine } from './components/status-line.ts'
@@ -1246,16 +1247,23 @@ function renderTranscriptMarkdown(model: TranscriptModel, sessionId: string): st
       case 'notice':
         lines.push(`> ${item.text.replace(/^·\s*/, '')}`, '')
         break
+      case 'banner':
+        lines.push('```text', ...LOGO_ROWS, '```', `${item.version} · ${item.title} — ${item.subtitle}`, `> ${item.info}`, '')
+        break
     }
   }
   return `${lines.join('\n')}\n`
 }
 
-/** Startup banner: version, current route, developer contact, first hints. */
+/** Startup banner: the DeepSeek whale, brand block, current route, first hints. */
 function pushWelcome(model: TranscriptModel, driver: AgentDriver): void {
   const version: string = packageInfo.version
-  model.pushNotice(t('welcome.title', { version }))
-  model.pushNotice(t('welcome.line', { route: `${driver.route.provider}/${driver.route.model}` }))
+  model.pushBanner(
+    t('welcome.version', { version }),
+    t('welcome.title'),
+    t('welcome.subtitle'),
+    t('welcome.line', { route: `${driver.route.provider}/${driver.route.model}` }),
+  )
   model.pushNotice(t('welcome.contact'))
 }
 

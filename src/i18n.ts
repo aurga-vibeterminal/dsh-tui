@@ -22,7 +22,9 @@ export type Locale = (typeof AVAILABLE)[number]
 
 const en = {
   // welcome & header
-  'welcome.title': 'dsh-tui v{version} · opencode-style console for DeepSeek Harness',
+  'welcome.version': 'v{version}',
+  'welcome.title': 'DeepSeek Harness TUI',
+  'welcome.subtitle': 'Developed by Vibe Terminal',
   'welcome.line': 'model {route} · type / for commands · ctrl+q quit',
   'welcome.contact': 'development & feedback: dev@vterminal.dev',
   'header.newSession': 'new session',
@@ -144,7 +146,9 @@ export type MessageKey = keyof typeof en
 const tables: Record<Locale, Record<string, string>> = {
   en,
   zh: {
-    'welcome.title': 'dsh-tui v{version} · DeepSeek Harness 的 opencode 风格终端控制台',
+    'welcome.version': 'v{version}',
+    'welcome.title': 'DeepSeek Harness TUI',
+    'welcome.subtitle': 'Developed by Vibe Terminal',
     'welcome.line': '模型 {route} · 输入 / 查看命令 · ctrl+q 退出',
     'welcome.contact': '开发与反馈：dev@vterminal.dev',
     'header.newSession': '新会话',

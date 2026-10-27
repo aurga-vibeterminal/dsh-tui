@@ -26,4 +26,23 @@ describe('prompt markers', () => {
     expect(userLine!.startsWith('\x1b]133;A\x07')).toBe(true)
     expect(assistantLine === undefined || !assistantLine.startsWith('\x1b]133;A\x07')).toBe(true)
   })
+
+  it('renders the startup banner: the whale carries the brand block', () => {
+    const model = new TranscriptModel()
+    model.pushBanner('v0.1.0', 'DeepSeek Harness TUI', 'Developed by Vibe Terminal', 'model p/m · type / for commands')
+    const lines = new TranscriptView(model.items, context).render(80)
+    const version = lines.find(line => line.includes('v0.1.0'))
+    const title = lines.find(line => line.includes('DeepSeek Harness TUI'))
+    const subtitle = lines.find(line => line.includes('Developed by Vibe Terminal'))
+    expect(version).toBeDefined()
+    expect(title).toBeDefined()
+    expect(subtitle).toBeDefined()
+    // Version rides above the title, the title above the subtitle.
+    expect(lines.indexOf(version!)).toBe(lines.indexOf(title!) - 1)
+    expect(lines.indexOf(title!)).toBe(lines.indexOf(subtitle!) - 1)
+    // The half-block whale art is present and styled (brand color or accent).
+    const art = lines.find(line => /\x1b\[(?:38;2;\d+;\d+;\d+|36)m[▀▄█]/.test(line))
+    expect(art).toBeDefined()
+    expect(art).toContain('▄')
+  })
 })

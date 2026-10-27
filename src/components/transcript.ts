@@ -9,7 +9,6 @@ import {
   Markdown,
   Text,
   truncateToWidth,
-  visibleWidth,
   type Component,
   type MarkdownTheme,
 } from '@earendil-works/pi-tui'
@@ -17,11 +16,51 @@ import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 import type { Theme } from '../theme.ts'
 import type { TranscriptItem } from '../events.ts'
 import { t } from '../i18n.ts'
+import { LOGO_RGB, LOGO_ROWS } from '../logo-cells.ts'
 
 /** Rendering dependencies shared by all item renderers. */
 export interface ItemContext {
   readonly theme: Theme
   readonly markdownTheme: MarkdownTheme
+}
+
+/**
+ * The DeepSeek whale, rasterized from the web app's favicon by
+ * `tools/logo-cells.mjs` into half-block rows — see `src/logo-cells.ts`.
+ */
+
+/**
+ * Truecolor support probe: the logo's brand blue needs direct-color ANSI;
+ * terminals without it get the blocks in the theme's accent color instead.
+ */
+function trueColorEnabled(): boolean {
+  if (process.env.COLORTERM === 'truecolor' || process.env.COLORTERM === '24bit') return true
+  const program = process.env.TERM_PROGRAM
+  if (program === 'iTerm.app' || program === 'vscode' || program === 'Apple_Terminal') return true
+  return process.env.WT_SESSION !== undefined || process.env.TERMINAL_EMULATOR === 'JetBrains-JediTerm'
+}
+
+/** One logo row: block runs in brand blue (or accent), spaces untouched. */
+function logoLine(row: string, theme: Theme): string {
+  const truecolor = trueColorEnabled()
+  const [r, g, b] = LOGO_RGB
+  let out = ''
+  let run = ''
+  const flush = (): void => {
+    if (run === '') return
+    out += truecolor ? `\x1b[38;2;${String(r)};${String(g)};${String(b)}m${run}\x1b[39m` : theme.accent(run)
+    run = ''
+  }
+  for (const ch of row) {
+    if (ch === ' ') {
+      flush()
+      out += ch
+    } else {
+      run += ch
+    }
+  }
+  flush()
+  return out
 }
 
 interface Entry {
@@ -90,6 +129,8 @@ function snapshotKey(item: TranscriptItem): string {
       return `tool|${item.name}|${item.argDigest}|${item.status}|${item.resultDigest ?? ''}|${String(item.expanded)}`
     case 'notice':
       return `notice|${item.text}|${item.tone}`
+    case 'banner':
+      return `banner|${item.version}|${item.title}|${item.subtitle}|${item.info}`
   }
 }
 
@@ -155,6 +196,19 @@ function createItemComponent(item: TranscriptItem, context: ItemContext): Compon
     }
     case 'notice':
       return new Text(item.tone === 'error' ? theme.error(item.text) : theme.dim(item.text), 0, 0)
+    case 'banner': {
+      // The whale logo carries the brand block: version over the title over
+      // the "powered by" line, vertically centered beside the art.
+      const firstTextRow = Math.floor((LOGO_ROWS.length - 3) / 2)
+      const texts = [theme.dim(item.version), theme.accent(item.title), theme.tool(item.subtitle)]
+      const rows = LOGO_ROWS.map((row, index) => {
+        const textIndex = index - firstTextRow
+        const text = textIndex >= 0 && textIndex < 3 ? `    ${texts[textIndex]}` : ''
+        return new Text(`${logoLine(row, theme)}${text}`, 0, 0)
+      })
+      rows.push(new Text(theme.dim(item.info), 0, 0), new Text('', 0, 0))
+      return new Compound(rows)
+    }
   }
 }
 

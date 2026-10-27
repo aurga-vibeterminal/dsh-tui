@@ -1,6 +1,6 @@
-# dsh-tui — User Guide
+# Vibe Terminal — User Guide
 
-An opencode-style fullscreen terminal console for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). This guide covers launching, keys, commands, and troubleshooting.
+**Vibe Terminal** is a fullscreen agent console for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). This guide covers launching, keys, commands, and troubleshooting.
 
 - [Install & launch](#install--launch)
 - [Sessions](#sessions)

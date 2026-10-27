@@ -1,7 +1,7 @@
 {
   "name": "@vterminal/dsh-tui",
   "version": "0.1.0",
-  "description": "Terminal UI bundle (addon) for DeepSeek Harness: opencode-style fullscreen agent console",
+  "description": "Vibe Terminal — a fullscreen agent console (TUI addon) for DeepSeek Harness",
   "type": "module",
   "license": "MIT",
   "publishConfig": {
@@ -85,6 +85,7 @@
     "@deepseek-ai/dsh-user-questions": "0.2.1-rc.2",
     "@deepseek-ai/dsh-working-directory": "0.2.1-rc.2",
     "@deepseek-ai/schemastery": "~3.18.5",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^26.6.5",
     "@xterm/headless": "^6.0.0",
     "tsdown": "^0.23.1",

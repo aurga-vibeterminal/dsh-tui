@@ -1,6 +1,6 @@
-# dsh-tui
+# Vibe Terminal
 
-A terminal UI **addon** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): an opencode-style fullscreen agent console running in-process as a dsh plugin bundle.
+**Vibe Terminal** — a fullscreen agent console for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`), running in-process as a dsh plugin bundle. Watch agents work, step in the moment you're needed, and ship.
 
 **Status: v0.1.0 — Phases 1–3 complete.** See [docs/PLAN.md](docs/PLAN.md) for the roadmap and [docs/GUIDE.md](docs/GUIDE.md) for the user guide (keys, commands, `@` file search, todos, permissions, themes, export).
 
