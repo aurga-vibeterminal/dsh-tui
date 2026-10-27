@@ -28,8 +28,8 @@ const en = {
   'header.newSession': 'new session',
   'header.tokens': ' tok',
   // hints
-  'hint.idle': 'enter send · alt+enter steer · / commands · ctrl+q quit',
-  'hint.running': 'enter queue · alt+enter steer · esc interrupt · ctrl+q quit',
+  'hint.idle': 'enter send · alt+s steer · / commands · ctrl+q quit',
+  'hint.running': 'enter queue · alt+s steer · esc interrupt · ctrl+q quit',
   // transcript chrome
   'transcript.thinking': 'thinking… ',
   'transcript.pending': '…',
@@ -149,8 +149,8 @@ const tables: Record<Locale, Record<string, string>> = {
     'welcome.contact': '开发与反馈：dev@vterminal.dev',
     'header.newSession': '新会话',
     'header.tokens': ' tokens',
-    'hint.idle': 'enter 发送 · alt+enter 转向 · / 命令 · ctrl+q 退出',
-    'hint.running': 'enter 排队 · alt+enter 转向 · esc 中断 · ctrl+q 退出',
+    'hint.idle': 'enter 发送 · alt+s 转向 · / 命令 · ctrl+q 退出',
+    'hint.running': 'enter 排队 · alt+s 转向 · esc 中断 · ctrl+q 退出',
     'transcript.thinking': '思考中… ',
     'transcript.pending': '…',
     'transcript.attemptDiscarded': '· 本次尝试已丢弃',

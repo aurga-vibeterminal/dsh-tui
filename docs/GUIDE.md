@@ -41,7 +41,7 @@ The profile composes `dsh-base` plus the TUI bundle; sessions are stored per wor
 | Key | Action |
 |---|---|
 | `Enter` | Send (queues into the next turn while the agent runs) |
-| `Alt+Enter` | **Steer** — submit as next-step input for the running turn |
+| `Alt+S` | **Steer** — submit as next-step input for the running turn |
 | `Shift+Enter` / `Ctrl+Enter` | New line |
 | `↑` / `↓` | Input history (empty editor) / cursor movement |
 | `Esc` | Interrupt the running turn |

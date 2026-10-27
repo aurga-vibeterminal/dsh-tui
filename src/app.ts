@@ -1036,10 +1036,10 @@ export class TuiApp {
           this.driver.model.toggleLastToolDetails()
           return { consume: true }
         }
-        // Alt+Enter submits the composer as a steering message for the next
+        // Alt+S submits the composer as a steering message for the next
         // step of the running turn (Enter stays send/queue; Shift+Enter and
         // Ctrl+Enter remain newline). Consumed before the editor sees it.
-        if (matchesKey(data, Key.alt('enter'))) {
+        if (matchesKey(data, Key.alt('s'))) {
           const text = this.editor.getText().trim()
           if (text !== '') {
             this.submitText(text, true)
@@ -1076,7 +1076,7 @@ export class TuiApp {
     })
   }
 
-  /** One submission path for Enter (send/queue) and Alt+Enter (steer). */
+  /** One submission path for Enter (send/queue) and Alt+S (steer). */
   private submitText(trimmed: string, steer: boolean): void {
     this.editor.addToHistory(trimmed)
     if (trimmed.startsWith('/')) {
@@ -1183,9 +1183,7 @@ function headerLine(model: TranscriptModel, theme: Theme): string {
 }
 
 function hintsLine(driver: AgentDriver, theme: Theme): string {
-  return theme.dim(driver.running
-    ? 'enter queue · alt+enter steer · esc interrupt · ctrl+q quit'
-    : 'enter send · alt+enter steer · / commands · ctrl+q quit')
+  return theme.dim(driver.running ? t('hint.running') : t('hint.idle'))
 }
 
 function truncate(text: string, max: number): string {
