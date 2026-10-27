@@ -112,7 +112,11 @@ There is no user-side todo editing; ask the agent to add, reorder, or complete i
 
 ## Themes
 
-`/theme` opens the picker; `/theme light` switches directly. The change re-skins every surface live (transcript, editor border, header, dialogs). The choice lasts for the run; persisted theme files arrive with the Phase 4 config work.
+`/theme` opens the picker; `/theme light` switches directly. The change re-skins every surface live (transcript, editor border, header, dialogs).
+
+## Persisted settings
+
+`/preset`, `/theme`, and `/language` write their choice to `$DSH_HOME/tui/settings.json` (default `~/.dsh/tui/settings.json`), so the preset mode, theme, and language survive restarts. Startup precedence is **CLI flag > saved setting > default** — `--preset ptc` overrides the saved preset for that run without rewriting it, and a missing or corrupt settings file is silently ignored (it is rewritten on the next change). A failed save only downgrades persistence for the current run and shows a notice; nothing else is affected.
 
 ## Exporting transcripts
 

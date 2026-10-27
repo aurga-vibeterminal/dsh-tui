@@ -89,7 +89,7 @@ export function apply(ctx: Context, config: Config): void {
     const { TuiApp } = await import('./app.ts')
     const app = await TuiApp.create(ctx, {
       resume: config.resume,
-      preset: config.preset ?? 'standard',
+      preset: config.preset,
       model: config.model === undefined ? undefined : parseModelRoute(config.model),
       theme: config.theme,
       prompt: config.prompt,

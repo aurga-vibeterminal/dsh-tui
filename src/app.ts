@@ -46,6 +46,7 @@ import type {} from '@deepseek-ai/dsh-permission-presets'
 import { THEME_NAMES, markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
 import { writeFile } from 'node:fs/promises'
 import { availableLocales, initSystemLocale, knownLocales, locale, setLocale, t } from './i18n.ts'
+import { loadTuiSettings, saveTuiSettings, type TuiSettings } from './settings.ts'
 import { createDebugLogger, StderrCapture, type Logger } from './util/log.ts'
 import packageInfo from '../package.json'
 
@@ -138,6 +139,8 @@ export class TuiApp {
     private readonly preset: string,
     /** Preset chosen via /preset, applied to the next materialized session. */
     private pendingPreset: string | undefined,
+    /** Persisted user settings ($DSH_HOME/tui/settings.json), mutated on change. */
+    private settings: TuiSettings,
     private readonly disposers: Array<() => void>,
   ) {}
 
@@ -146,12 +149,22 @@ export class TuiApp {
    * layout, then input handling.
    */
   static async create(ctx: Context, options: AppOptions): Promise<TuiApp> {
+    // Persisted settings: CLI flags win, saved values fill the gaps, defaults
+    // close (preset `standard`, theme `dark`, locale auto-detected).
+    const settings = await loadTuiSettings()
     initSystemLocale()
-    const theme = themeByName(options.theme)
+    if (settings.locale !== undefined) setLocale(settings.locale)
+    const savedTheme = settings.theme !== undefined && (THEME_NAMES as readonly string[]).includes(settings.theme)
+      ? settings.theme
+      : undefined
+    const theme = themeByName(options.theme ?? savedTheme)
     const themeRef: { current: Theme } = { current: theme }
     const log = createDebugLogger()
     const model = new TranscriptModel(createToolPresenter(ctx))
-    const driver = await createDriver(ctx, model, { resume: options.resume, preset: options.preset, model: options.model })
+    const preset = options.preset
+      ?? (settings.preset !== undefined && PRESET_MODES.some(mode => mode.id === settings.preset) ? settings.preset : undefined)
+      ?? 'standard'
+    const driver = await createDriver(ctx, model, { resume: options.resume, preset, model: options.model })
 
     const stderr = new StderrCapture(log)
     stderr.install()
@@ -190,7 +203,7 @@ export class TuiApp {
     }
     tui.setFocus(editor)
 
-    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, themeRef, itemContext, log, options.preset ?? 'standard', undefined, [])
+    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, themeRef, itemContext, log, preset, undefined, settings, [])
     app.wire(model)
     app.wireInteractions(ctx)
     app.wireCommands()
@@ -288,6 +301,7 @@ export class TuiApp {
   private applyTheme(name: string): void {
     const next = themeByName(name)
     if (next === this.theme) {
+      this.persistSetting('theme', name)
       this.driver.model.pushNotice(t('notice.themeStays', { name }))
       return
     }
@@ -296,6 +310,7 @@ export class TuiApp {
     this.itemContext = { theme: next, markdownTheme: markdownThemeFor(next) }
     this.transcript.setContext(this.itemContext)
     this.editor.borderColor = next.border
+    this.persistSetting('theme', name)
     this.driver.model.pushNotice(t('notice.themeChanged', { name }))
     this.tui.requestRender()
   }
@@ -366,6 +381,7 @@ export class TuiApp {
   private applyLanguage(name: string): void {
     const label = availableLocales().find(entry => entry.id === name)?.label ?? name
     if (setLocale(name)) {
+      this.persistSetting('locale', name)
       this.driver.model.pushNotice(t('notice.langChanged', { name: label }))
       return
     }
@@ -488,13 +504,25 @@ export class TuiApp {
     })
   }
 
+  /** Update one persisted setting and write the file; failures surface as a notice. */
+  private persistSetting<K extends keyof TuiSettings>(key: K, value: TuiSettings[K]): void {
+    this.settings = { ...this.settings, [key]: value }
+    void saveTuiSettings(this.settings).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      this.log.debug(`settings save failed: ${message}`)
+      this.driver.model.pushNotice(t('notice.settingsSaveFailed'), 'error')
+    })
+  }
+
   private applyPresetSelection(id: string): void {
     if (id === (this.pendingPreset ?? this.preset)) {
+      this.persistSetting('preset', id)
       this.driver.model.pushNotice(t('notice.presetStays', { preset: id }))
       return
     }
     this.pendingPreset = id
     this.driver.setPreset(id)
+    this.persistSetting('preset', id)
     this.driver.model.pushNotice(t('notice.presetChange', { preset: id }))
   }
 
