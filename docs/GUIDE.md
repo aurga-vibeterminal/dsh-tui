@@ -23,6 +23,7 @@ dsh plugin --profile tui add github:<org>/dsh-tui # git source
 dsh tui                                            # shorthand for dsh --profile tui
 dsh tui -r                                         # open the session picker at startup
 dsh tui -r session-xxxx                            # continue a stored session (alias --resume)
+dsh tui --preset ptc                               # agent mode: standard (default) | ptc | minimal | cordis
 dsh tui --model deepseek-account/deepseek-v4-flash # explicit model route
 ```
 

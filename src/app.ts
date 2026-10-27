@@ -40,7 +40,7 @@ import { fuzzyFileItems, resolveFdPath } from './components/file-search.ts'
 import { TranscriptModel, type TranscriptItem } from './events.ts'
 import { TranscriptView, type ItemContext } from './components/transcript.ts'
 import { LineText } from './components/line-text.ts'
-import { ApprovalDialog, EventsDialog, ListDialog, QuestionDialog } from './dialogs.ts'
+import { ApprovalDialog, EventsDialog, ListDialog, PickerDialog, QuestionDialog } from './dialogs.ts'
 import { StatusLine } from './components/status-line.ts'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import { THEME_NAMES, markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
@@ -51,6 +51,7 @@ import packageInfo from '../package.json'
 
 export interface AppOptions {
   resume: string | undefined
+  preset: string | undefined
   model: DriverModelRoute | undefined
   theme: string | undefined
   /** Startup prompt sent immediately after boot. */
@@ -127,6 +128,7 @@ export class TuiApp {
     private themeRef: { current: Theme },
     private itemContext: ItemContext,
     private readonly log: Logger,
+    private readonly preset: string,
     private readonly disposers: Array<() => void>,
   ) {}
 
@@ -140,7 +142,7 @@ export class TuiApp {
     const themeRef: { current: Theme } = { current: theme }
     const log = createDebugLogger()
     const model = new TranscriptModel(createToolPresenter(ctx))
-    const driver = await createDriver(ctx, model, { resume: options.resume, model: options.model })
+    const driver = await createDriver(ctx, model, { resume: options.resume, preset: options.preset, model: options.model })
 
     const stderr = new StderrCapture(log)
     stderr.install()
@@ -179,7 +181,7 @@ export class TuiApp {
     }
     tui.setFocus(editor)
 
-    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, themeRef, itemContext, log, [])
+    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, themeRef, itemContext, log, options.preset ?? 'standard', [])
     app.wire(model)
     app.wireInteractions(ctx)
     app.wireCommands()
@@ -469,7 +471,12 @@ export class TuiApp {
       this.log.debug(`driver dispose failed: ${error instanceof Error ? error.message : String(error)}`)
     }
     model.reset()
-    this.driver = await createDriver(this.ctx, model, { resume: undefined, model: undefined, lazy: true })
+    this.driver = await createDriver(this.ctx, model, {
+      resume: undefined,
+      preset: this.preset,
+      model: undefined,
+      lazy: true,
+    })
     this.refreshCommandAutocomplete()
     model.pushNotice(t('notice.newSessionStarted'))
   }
@@ -559,13 +566,13 @@ export class TuiApp {
     }
     model.reset()
     try {
-      this.driver = await createDriver(this.ctx, model, { resume: sessionId, model: undefined })
+      this.driver = await createDriver(this.ctx, model, { resume: sessionId, preset: this.preset, model: undefined })
       this.refreshCommandAutocomplete()
       this.driver.model.pushNotice(`· switched to session ${sessionId.slice(0, 13)}…`)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       this.log.debug(`session resume failed: ${message}`)
-      this.driver = await createDriver(this.ctx, model, { resume: undefined, model: undefined })
+      this.driver = await createDriver(this.ctx, model, { resume: undefined, preset: this.preset, model: undefined })
       this.refreshCommandAutocomplete()
       this.driver.model.pushNotice(`· resume failed; started a fresh session (${message.slice(0, 100)})`, 'error')
     }

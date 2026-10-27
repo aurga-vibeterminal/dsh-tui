@@ -44,11 +44,14 @@ export interface TuiStartupValues {
   record: string | undefined
   /** Dev tooling (with --record): interrupt the turn after this many ms. */
   interruptAfterMs: number | undefined
+  /** Agent preset mode id (standard | ptc | minimal | cordis). */
+  preset: string | undefined
 }
 
 /** Commander option shape of this app's program. */
 interface TuiOptions {
   resume?: string | boolean | undefined
+  preset?: string | undefined
   model?: string | undefined
   reasoningEffort?: string | undefined
   theme?: string | undefined
@@ -56,6 +59,8 @@ interface TuiOptions {
   /** Commander exposes `--interrupt-after <ms>` under this key (no -Ms suffix). */
   interruptAfter?: string | undefined
 }
+
+const PRESET_IDS = ['standard', 'ptc', 'minimal', 'cordis'] as const
 
 /**
  * This app's command: its flags and help text. Fresh per call, so one process
@@ -68,6 +73,7 @@ export function tuiCommand(): Command {
     .description('Interactive terminal UI for a DeepSeek Harness agent.')
     .helpOption('-h, --help', 'show this help')
     .option('-r, --resume [id]', 'resume a session: with an id resume that one; bare -r opens the session picker at startup')
+    .option('--preset <id>', 'agent preset mode: standard | ptc | minimal | cordis (default: standard)')
     .option('--model <provider/model>', 'explicit model route; overrides the profile default')
     .option('--reasoning-effort <id>', 'adapter-owned reasoning effort for the selected route')
     .option('--theme <name>', 'UI theme name (default: dark)')
@@ -109,6 +115,10 @@ function valuesFromOptions(options: TuiOptions, args: readonly string[], error: 
     }
     model = { provider, model: modelId }
   }
+  const preset = options.preset
+  if (preset !== undefined && !(PRESET_IDS as readonly string[]).includes(preset)) {
+    error(`--preset expects one of ${PRESET_IDS.join(' | ')}, received ${JSON.stringify(preset)}`)
+  }
   const reasoningEffort = options.reasoningEffort
   if (reasoningEffort !== undefined && reasoningEffort.trim() === '') {
     error('--reasoning-effort requires a non-empty id')
@@ -140,7 +150,7 @@ function valuesFromOptions(options: TuiOptions, args: readonly string[], error: 
   if (record !== undefined && prompt === undefined) {
     error('--record requires a prompt to drive the recorded turn')
   }
-  return { resume, resumePicker, model, reasoningEffort, theme, prompt, record, interruptAfterMs }
+  return { resume, resumePicker, model, reasoningEffort, theme, preset, prompt, record, interruptAfterMs }
 }
 
 /**

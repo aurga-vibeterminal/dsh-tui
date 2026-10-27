@@ -42,6 +42,11 @@ describe('parseTuiArgs', () => {
     expect(parseTuiArgs(['-r', 'session-abc'])).toEqual({ ...absent, resume: 'session-abc' })
   })
 
+  it('validates the preset mode id', () => {
+    expect(parseTuiArgs(['--preset', 'ptc'])).toEqual({ ...absent, preset: 'ptc' })
+    expect(() => parseTuiArgs(['--preset', 'bogus'])).toThrow()
+  })
+
   it('parses the record mode with its prompt', () => {
     expect(parseTuiArgs(['--record', 'test/fixtures/x', 'drive', 'the', 'turn'])).toEqual({
       ...absent,

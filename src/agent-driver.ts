@@ -47,6 +47,8 @@ export interface DriverOptions {
   resume: string | undefined
   /** Explicit model route; absent keeps the default selection. */
   model: DriverModelRoute | undefined
+  /** Agent preset mode id; applied to freshly created sessions. */
+  preset: string | undefined
   /** Defer session/agent creation until the first send (no idle junk sessions). */
   lazy?: boolean
 }
@@ -211,7 +213,9 @@ export async function createDriver(
     }
     if (options.resume === undefined) {
       const sessionId = brandString<SessionId>(`session-${randomUUID()}`)
-      handle = await agents.create({ sessionId, meta: { cwd }, agentOptions: agentOptions(), setup })
+      const meta: { cwd: string; agentPreset?: string } = { cwd }
+      if (options.preset !== undefined) meta.agentPreset = options.preset
+      handle = await agents.create({ sessionId, meta: meta as never, agentOptions: agentOptions(), setup })
     } else {
       if (ctx.get('sessionPersistence') === undefined) {
         throw new Error('tui --resume requires the sessionPersistence service; dsh-base provides it')

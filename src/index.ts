@@ -31,6 +31,8 @@ export interface Config {
   resume?: string
   /** Bare -r: open the session picker at startup. */
   resumePicker?: boolean
+  /** Agent preset mode id (standard | ptc | minimal | cordis). */
+  preset?: string
   /** Explicit `provider/model` route; absent keeps the default selection. */
   model?: string
   /** UI theme name. */
@@ -87,6 +89,7 @@ export function apply(ctx: Context, config: Config): void {
     const { TuiApp } = await import('./app.ts')
     const app = await TuiApp.create(ctx, {
       resume: config.resume,
+      preset: config.preset ?? 'standard',
       model: config.model === undefined ? undefined : parseModelRoute(config.model),
       theme: config.theme,
       prompt: config.prompt,
