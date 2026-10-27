@@ -114,6 +114,13 @@ function tokenAfterSeparators(before: string): string | null {
   return match === null ? null : match[1]!
 }
 
+const PRESET_MODES = [
+  { id: 'standard', zh: '标准（全套工具）' },
+  { id: 'ptc', zh: 'PTC（程序化工具调用）' },
+  { id: 'minimal', zh: '极简（只读为主）' },
+  { id: 'cordis', zh: '创造（组合编排）' },
+] as const
+
 export class TuiApp {
   private constructor(
     private readonly ctx: Context,
@@ -129,6 +136,8 @@ export class TuiApp {
     private itemContext: ItemContext,
     private readonly log: Logger,
     private readonly preset: string,
+    /** Preset chosen via /preset, applied to the next materialized session. */
+    private pendingPreset: string | undefined,
     private readonly disposers: Array<() => void>,
   ) {}
 
@@ -181,7 +190,7 @@ export class TuiApp {
     }
     tui.setFocus(editor)
 
-    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, themeRef, itemContext, log, options.preset ?? 'standard', [])
+    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, themeRef, itemContext, log, options.preset ?? 'standard', undefined, [])
     app.wire(model)
     app.wireInteractions(ctx)
     app.wireCommands()
@@ -446,6 +455,48 @@ export class TuiApp {
     }
   }
 
+  /** /preset: preset picker; /preset <id>: apply directly. Applies to the next session. */
+  private pickPreset(argument: string): void {
+    if (argument !== '') {
+      const mode = PRESET_MODES.find(p => p.id === argument)
+      if (mode === undefined) {
+        this.driver.model.pushNotice(`· unknown preset ${argument} (available: ${PRESET_MODES.map(p => p.id).join(', ')})`, 'error')
+        return
+      }
+      this.applyPresetSelection(argument)
+      return
+    }
+    const current = this.pendingPreset ?? this.preset
+    const picker = new PickerDialog(
+      t('dialog.presetTitle'),
+      PRESET_MODES.map(p => ({
+        value: p.id,
+        label: `${p.id === current ? '● ' : ''}${p.id}`,
+        description: p.zh,
+      })),
+      this.theme,
+      '↑↓ move · enter select · esc cancel',
+      8,
+    )
+    void this.showDialog(picker).then(selected => {
+      if (selected === undefined) {
+        this.driver.model.pushNotice(t('notice.presetCancelled'))
+        return
+      }
+      this.applyPresetSelection(selected)
+    })
+  }
+
+  private applyPresetSelection(id: string): void {
+    if (id === (this.pendingPreset ?? this.preset)) {
+      this.driver.model.pushNotice(t('notice.presetStays', { preset: id }))
+      return
+    }
+    this.pendingPreset = id
+    this.driver.setPreset(id)
+    this.driver.model.pushNotice(t('notice.presetChange', { preset: id }))
+  }
+
   /** /cwd with no argument shows the directory; with one it changes it. */
   private async dispatchCwd(path: string): Promise<void> {
     if (path === '') {
@@ -640,6 +691,7 @@ export class TuiApp {
       { name: 'clear', description: 'clear the transcript view' },
       { name: 'session', description: 'list stored sessions and switch (alias: resume)' },
       { name: 'new', description: 'start a fresh session (old one stays in /session)' },
+      { name: 'preset', description: 'show or set the agent preset mode (next session)' },
       { name: 'resume', description: 'switch to a stored session (alias: session)' },
       { name: 'events', description: 'inspect raw session events' },
       { name: 'model', description: 'switch provider/model/effort' },
@@ -751,6 +803,10 @@ export class TuiApp {
         return true
       }
       await this.startNewSession()
+      return true
+    }
+    if (line === '/preset' || line.startsWith('/preset ')) {
+      this.pickPreset(line.slice(7).trim())
       return true
     }
     if (line === '/cwd' || line.startsWith('/cwd ')) {

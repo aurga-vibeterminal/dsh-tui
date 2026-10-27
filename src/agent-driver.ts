@@ -71,6 +71,8 @@ export interface AgentDriver {
   steer(text: string): Promise<void>
   /** Switch the model for the next step. */
   setModel(switchTo: ModelSwitch): void
+  /** Set the agent preset applied when the (lazy) session materializes. */
+  setPreset(id: string): void
   /** Effective working directory. */
   workingDirectory(): string
   /** Change the working directory (durable). */
@@ -150,6 +152,7 @@ export async function createDriver(
 
   const fs = ctx.get('fs')
   const cwd = fs === undefined ? process.cwd() : fs.processPath(await fs.resolve('.'))
+  let driverPreset = options.preset
   const statusListeners: Array<(running: boolean) => void> = []
 
   let selectionRef: ModelSelectionRef | undefined
@@ -214,7 +217,7 @@ export async function createDriver(
     if (options.resume === undefined) {
       const sessionId = brandString<SessionId>(`session-${randomUUID()}`)
       const meta: { cwd: string; agentPreset?: string } = { cwd }
-      if (options.preset !== undefined) meta.agentPreset = options.preset
+      if (driverPreset !== undefined) meta.agentPreset = driverPreset
       handle = await agents.create({ sessionId, meta: meta as never, agentOptions: agentOptions(), setup })
     } else {
       if (ctx.get('sessionPersistence') === undefined) {
@@ -298,6 +301,9 @@ export async function createDriver(
             : { reasoningEffort: ReasoningEffortId(switchTo.reasoningEffort) }),
         }
       }
+    },
+    setPreset(id: string): void {
+      driverPreset = id
     },
     workingDirectory(): string {
       const service = ctx.get('workingDirectory')

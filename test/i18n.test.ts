@@ -6,6 +6,7 @@ describe('i18n', () => {
     expect(t('notice.todos', { done: '2', total: '5' })).toBe('· todos 2/5 done (/todo)')
     expect(t('welcome.title', { version: '9.9.9' })).toContain('v9.9.9')
     expect(t('notice.cwdChange')).toBe('· cwd → {cwd}')
+    expect(t('notice.presetChange', { preset: 'ptc' })).toContain('ptc')
   })
 
   it('falls back to the key for unknown ids', () => {

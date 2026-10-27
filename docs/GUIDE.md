@@ -69,6 +69,7 @@ TUI-local commands (always available):
 | `/new` | Start a fresh session (the old one stays in `/session`) |
 | `/fork` | Fork the current session and switch onto the branch |
 | `/model` | Provider / model / reasoning-effort picker (hot-switch, applies to the next step) |
+| `/preset [id]` | Show or set the agent preset mode — `standard` / `ptc` / `minimal` / `cordis` (applies to the next session; same modes as the web UI) |
 | `/cwd [path]` | Show or change the session working directory |
 | `/inbox` | View and remove queued or steering input |
 | `/todo` | Show the agent's current todo list |
