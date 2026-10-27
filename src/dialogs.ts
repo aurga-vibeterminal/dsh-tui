@@ -258,6 +258,7 @@ export class PickerDialog implements Component {
     private readonly title: string,
     items: readonly { value: string, label: string, description?: string }[],
     private readonly theme: Theme,
+    private readonly requestRender: () => void,
     private readonly hints: string,
     maxVisible = 12,
   ) {
@@ -273,6 +274,11 @@ export class PickerDialog implements Component {
     this.done = new Promise<string | undefined>((resolve) => {
       this.resolveDone = resolve
     })
+    // Selection changes redraw the cached overlay lines.
+    this.list.onSelectionChange = () => {
+      this.invalidate()
+      this.requestRender()
+    }
     this.list.onSelect = (item) => {
       if (this.settled) return
       this.settled = true
@@ -286,6 +292,8 @@ export class PickerDialog implements Component {
   }
 
   invalidate(): void {
+    this.cacheWidth = undefined
+    this.cacheLines = undefined
     this.list.invalidate()
   }
 
@@ -302,8 +310,6 @@ export class PickerDialog implements Component {
     this.cacheLines = lines
     return lines
   }
-
-  private settledGetterUnused(): void {}
 }
 
 /** Generic read-only list overlay (todos, exports, static info). */

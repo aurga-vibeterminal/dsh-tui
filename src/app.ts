@@ -475,6 +475,7 @@ export class TuiApp {
         description: p.zh,
       })),
       this.theme,
+      () => this.tui.requestRender(),
       '↑↓ move · enter select · esc cancel',
       8,
     )
@@ -524,7 +525,7 @@ export class TuiApp {
     model.reset()
     this.driver = await createDriver(this.ctx, model, {
       resume: undefined,
-      preset: this.preset,
+      preset: this.pendingPreset ?? this.preset,
       model: undefined,
       lazy: true,
     })
@@ -533,8 +534,7 @@ export class TuiApp {
   }
 
   /** Overlay picker over stored sessions; switching rebuilds the driver on the target. */
-  private async pickSession(): Promise<void> {
-    if (this.driver.running) {
+  private async pickSession(): Promise<void> {    if (this.driver.running) {
       this.driver.model.pushNotice('· interrupt the running turn first (esc)')
       return
     }
@@ -617,13 +617,13 @@ export class TuiApp {
     }
     model.reset()
     try {
-      this.driver = await createDriver(this.ctx, model, { resume: sessionId, preset: this.preset, model: undefined })
+      this.driver = await createDriver(this.ctx, model, { resume: sessionId, preset: this.pendingPreset ?? this.preset, model: undefined })
       this.refreshCommandAutocomplete()
       this.driver.model.pushNotice(`· switched to session ${sessionId.slice(0, 13)}…`)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       this.log.debug(`session resume failed: ${message}`)
-      this.driver = await createDriver(this.ctx, model, { resume: undefined, preset: this.preset, model: undefined })
+      this.driver = await createDriver(this.ctx, model, { resume: undefined, preset: this.pendingPreset ?? this.preset, model: undefined })
       this.refreshCommandAutocomplete()
       this.driver.model.pushNotice(`· resume failed; started a fresh session (${message.slice(0, 100)})`, 'error')
     }
