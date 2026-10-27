@@ -890,7 +890,7 @@ export class TuiApp {
   }
 
   /** Run until the user quits; resolves with the exit code. */
-  async run(initialPrompt: string | undefined): Promise<AppResult> {
+  async run(initialPrompt: string | undefined, openSessionPicker = false): Promise<AppResult> {
     let settled = false
     const finish = (code: number): void => {
       if (settled) return
@@ -967,6 +967,10 @@ export class TuiApp {
     }
 
     this.tui.start()
+    if (openSessionPicker) {
+      // Bare -r: pick a stored session before anything else happens.
+      await this.pickSession()
+    }
     if (initialPrompt !== undefined && initialPrompt.trim() !== '') {
       this.driver.send(initialPrompt)
     }

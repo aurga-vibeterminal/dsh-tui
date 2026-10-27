@@ -21,7 +21,8 @@ An opencode-style fullscreen terminal console for [DeepSeek Harness](https://git
 dsh plugin --profile tui add D:\path\to\dsh-tui   # local path
 dsh plugin --profile tui add github:<org>/dsh-tui # git source
 dsh tui                                            # shorthand for dsh --profile tui
-dsh tui --resume session-xxxx                      # continue a stored session
+dsh tui -r                                         # open the session picker at startup
+dsh tui -r session-xxxx                            # continue a stored session (alias --resume)
 dsh tui --model deepseek-account/deepseek-v4-flash # explicit model route
 ```
 

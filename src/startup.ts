@@ -30,6 +30,8 @@ export interface TuiModelRoute {
 export interface TuiStartupValues {
   /** Exact persisted Session identity to resume; absent for a fresh session. */
   resume: string | undefined
+  /** Bare `-r`: open the session picker at startup. */
+  resumePicker: boolean
   /** Explicit model route; absent keeps the profile's default selection. */
   model: TuiModelRoute | undefined
   /** Adapter-owned reasoning-effort id; absent keeps the model default. */
@@ -46,7 +48,7 @@ export interface TuiStartupValues {
 
 /** Commander option shape of this app's program. */
 interface TuiOptions {
-  resume?: string | undefined
+  resume?: string | boolean | undefined
   model?: string | undefined
   reasoningEffort?: string | undefined
   theme?: string | undefined
@@ -65,7 +67,7 @@ export function tuiCommand(): Command {
     .name('dsh --profile tui')
     .description('Interactive terminal UI for a DeepSeek Harness agent.')
     .helpOption('-h, --help', 'show this help')
-    .option('--resume <id>', 'resume the persisted Session with this id; an unknown id is an error')
+    .option('-r, --resume [id]', 'resume a session: with an id resume that one; bare -r opens the session picker at startup')
     .option('--model <provider/model>', 'explicit model route; overrides the profile default')
     .option('--reasoning-effort <id>', 'adapter-owned reasoning effort for the selected route')
     .option('--theme <name>', 'UI theme name (default: dark)')
@@ -87,17 +89,23 @@ Examples:
  * @returns the values the runner consumes.
  */
 function valuesFromOptions(options: TuiOptions, args: readonly string[], error: (message: string) => never): TuiStartupValues {
-  const resume = options.resume
-  if (resume !== undefined && resume.trim() === '') {
-    error('--resume requires a non-empty session id')
+  const resumeRaw = options.resume
+  let resume: string | undefined
+  const resumePicker = resumeRaw === true
+  if (typeof resumeRaw === 'string') {
+    resume = resumeRaw
+    if (resume.trim() === '') {
+      error('--resume requires a non-empty session id')
+    }
   }
+  const modelRaw = options.model
   let model: TuiModelRoute | undefined
-  if (options.model !== undefined) {
-    const separator = options.model.indexOf('/')
-    const provider = separator <= 0 ? '' : options.model.slice(0, separator).trim()
-    const modelId = separator < 0 ? '' : options.model.slice(separator + 1).trim()
+  if (modelRaw !== undefined) {
+    const separator = modelRaw.indexOf('/')
+    const provider = separator <= 0 ? '' : modelRaw.slice(0, separator).trim()
+    const modelId = separator < 0 ? '' : modelRaw.slice(separator + 1).trim()
     if (provider === '' || modelId === '') {
-      error(`--model expects <provider>/<model>, received ${JSON.stringify(options.model)}`)
+      error(`--model expects <provider>/<model>, received ${JSON.stringify(modelRaw)}`)
     }
     model = { provider, model: modelId }
   }
@@ -132,7 +140,7 @@ function valuesFromOptions(options: TuiOptions, args: readonly string[], error: 
   if (record !== undefined && prompt === undefined) {
     error('--record requires a prompt to drive the recorded turn')
   }
-  return { resume, model, reasoningEffort, theme, prompt, record, interruptAfterMs }
+  return { resume, resumePicker, model, reasoningEffort, theme, prompt, record, interruptAfterMs }
 }
 
 /**

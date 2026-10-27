@@ -3,6 +3,7 @@ import { parseTuiArgs } from '../src/startup.ts'
 
 const absent = {
   resume: undefined,
+  resumePicker: false,
   model: undefined,
   reasoningEffort: undefined,
   theme: undefined,
@@ -30,6 +31,15 @@ describe('parseTuiArgs', () => {
 
   it('joins a multi-word positional prompt', () => {
     expect(parseTuiArgs(['hello', 'dsh', 'world'])).toEqual({ ...absent, prompt: 'hello dsh world' })
+  })
+
+  it('bare -r opens the session picker at startup', () => {
+    expect(parseTuiArgs(['-r'])).toEqual({ ...absent, resumePicker: true })
+    expect(parseTuiArgs(['--resume'])).toEqual({ ...absent, resumePicker: true })
+  })
+
+  it('-r with an id resumes directly (no picker)', () => {
+    expect(parseTuiArgs(['-r', 'session-abc'])).toEqual({ ...absent, resume: 'session-abc' })
   })
 
   it('parses the record mode with its prompt', () => {

@@ -10,6 +10,7 @@
       inject: [tuiStartup]
       config:
         resume: !!js ctx.tuiStartup.resume
+        resumePicker: !!js ctx.tuiStartup.resumePicker
         model: !!js "ctx.tuiStartup.model === undefined ? undefined : ctx.tuiStartup.model.provider + '/' + ctx.tuiStartup.model.model"
         theme: !!js ctx.tuiStartup.theme ?? 'dark'
         prompt: !!js ctx.tuiStartup.prompt

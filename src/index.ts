@@ -29,6 +29,8 @@ export const inject = ['agentDefaultModel']
 export interface Config {
   /** Persisted Session id to resume; absent for a fresh session. */
   resume?: string
+  /** Bare -r: open the session picker at startup. */
+  resumePicker?: boolean
   /** Explicit `provider/model` route; absent keeps the default selection. */
   model?: string
   /** UI theme name. */
@@ -43,6 +45,7 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   resume: z.string(),
+  resumePicker: z.boolean(),
   model: z.string(),
   theme: z.string(),
   prompt: z.string(),
@@ -88,7 +91,7 @@ export function apply(ctx: Context, config: Config): void {
       theme: config.theme,
       prompt: config.prompt,
     })
-    const result = await app.run(config.prompt)
+    const result = await app.run(config.prompt, config.resumePicker === true)
     exit(result.exitCode)
   })().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error)
