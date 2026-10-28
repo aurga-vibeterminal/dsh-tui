@@ -22,6 +22,9 @@
         prompt: !!js ctx.tuiStartup.prompt
         record: !!js ctx.tuiStartup.record
         interruptAfterMs: !!js ctx.tuiStartup.interruptAfterMs
-# A full-screen interactive app must never observe a replacement composition.
+# HMR stays enabled with the base default `root: []` — configuration watches
+# only, no module watching: profile patch changes (e.g. MCP rows added through
+# the conversation) apply live, while the dev-linked bundle's rebuilt code is
+# never hot-swapped under the fullscreen app. /reload forces a reconcile.
 - id: hmr
-  disabled: true
+  disabled: false

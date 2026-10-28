@@ -578,6 +578,41 @@ export class TuiApp {
     this.driver.model.pushNotice(t('notice.thinkingChange', { effort: displayEffort({ id: effort, name: '' }) }))
   }
 
+  /** /reload: reconcile the profile composition in place (new plugin rows, config) without restarting. */
+  private async reloadComposition(): Promise<void> {
+    const hmr = this.ctx.get('hmr') as {
+      runExclusive<T>(run: () => Promise<T>): Promise<T>
+      reconcileProfile(): Promise<{
+        warnings: readonly string[]
+        pending: readonly { url?: string, reason?: string }[]
+        restartReason?: string | undefined
+      }>
+    } | undefined
+    if (hmr === undefined) {
+      this.driver.model.pushNotice(t('notice.reloadUnavailable'), 'error')
+      return
+    }
+    this.driver.model.pushNotice(t('notice.reloadStarted'))
+    try {
+      const result = await hmr.runExclusive(() => hmr.reconcileProfile())
+      for (const warning of result.warnings.slice(0, 3)) {
+        this.driver.model.pushNotice(`· ${warning.slice(0, 160)}`)
+      }
+      if (result.restartReason !== undefined) {
+        this.driver.model.pushNotice(t('notice.reloadRestart', { reason: result.restartReason.slice(0, 120) }), 'error')
+        return
+      }
+      if (result.pending.length > 0) {
+        this.driver.model.pushNotice(t('notice.reloadPending', { count: String(result.pending.length) }))
+        return
+      }
+      this.driver.model.pushNotice(t('notice.reloadApplied'))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.driver.model.pushNotice(t('notice.reloadFailed', { message: message.slice(0, 140) }), 'error')
+    }
+  }
+
   /** /mcp: pick an MCP server, then drill into its detail (two-level). */
   private async showMcpServers(): Promise<void> {
     // The registry's enumeration surface moved across runtime versions:
@@ -923,6 +958,7 @@ export class TuiApp {
       { name: 'model', description: 'switch provider/model/effort' },
       { name: 'thinking', description: 'switch the reasoning level (off | low | high | max), alias: /effort' },
       { name: 'mcp', description: 'list connected MCP servers and their tools' },
+      { name: 'reload', description: 'apply profile composition changes (new plugin/MCP rows) without restarting' },
       { name: 'cwd', description: 'show or change the working directory' },
       { name: 'inbox', description: 'view and remove queued or steering input' },
       { name: 'fork', description: 'fork the current session and switch to it' },
@@ -1020,6 +1056,10 @@ export class TuiApp {
     }
     if (line === '/mcp') {
       await this.showMcpServers()
+      return true
+    }
+    if (line === '/reload') {
+      await this.reloadComposition()
       return true
     }
     if (line === '/inbox') {
