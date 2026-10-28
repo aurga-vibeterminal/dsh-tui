@@ -578,6 +578,67 @@ export class TuiApp {
     this.driver.model.pushNotice(t('notice.thinkingChange', { effort: displayEffort({ id: effort, name: '' }) }))
   }
 
+  /** /mcp: pick an MCP server, then drill into its detail (two-level). */
+  private async showMcpServers(): Promise<void> {
+    // The registry's enumeration surface moved across runtime versions:
+    // `view().visible` (0.2.1-rc.2) and `definitions()` (later) both work.
+    const tools = this.ctx.get('tools') as {
+      definitions?: () => readonly { name: string }[]
+      view?: (scope?: unknown) => { visible: ReadonlyMap<string, unknown> }
+    } | undefined
+    if (tools === undefined || (tools.definitions === undefined && tools.view === undefined)) {
+      this.driver.model.pushNotice(t('notice.mcpUnavailable'), 'error')
+      return
+    }
+    const names: string[] = []
+    if (tools.definitions !== undefined) {
+      for (const definition of tools.definitions()) names.push(definition.name)
+    } else {
+      const registryView = tools.view?.()
+      for (const name of registryView?.visible.keys() ?? []) names.push(name)
+    }
+    const byServer = new Map<string, string[]>()
+    for (const name of names) {
+      if (!name.startsWith('mcp__')) continue
+      const separator = name.indexOf('__', 4)
+      if (separator <= 4) continue
+      const server = name.slice(4, separator)
+      const tool = name.slice(separator + 2)
+      const bucket = byServer.get(server)
+      if (bucket === undefined) byServer.set(server, [tool])
+      else bucket.push(tool)
+    }
+    if (byServer.size === 0) {
+      this.driver.model.pushNotice(t('notice.mcpNone'))
+      return
+    }
+    // Level 1: only the server list; Enter drills into one server's detail,
+    // closing the detail returns to the list, Esc on the list exits.
+    for (;;) {
+      const picker = new PickerDialog(
+        t('dialog.mcpTitle'),
+        [...byServer.entries()].map(([server, serverTools]) => ({
+          value: server,
+          label: server,
+          description: t('dialog.mcpServerCount', { count: String(serverTools.length) }),
+        })),
+        this.theme,
+        () => this.tui.requestRender(),
+        '↑↓ move · enter details · esc close',
+        10,
+      )
+      const server = await this.showDialog(picker)
+      if (server === undefined) return
+      const serverTools = byServer.get(server) ?? []
+      const rows = [
+        `✓ ${t('dialog.mcpConnected')} · ${t('dialog.mcpServerCount', { count: String(serverTools.length) })}`,
+        '',
+        ...serverTools.map(tool => `  ${tool}`),
+      ]
+      await this.showDialog(new ListDialog(t('dialog.mcpDetailTitle', { server }), rows, this.theme))
+    }
+  }
+
   /** /preset: preset picker; /preset <id>: apply directly. Applies to the next session. */
   private pickPreset(argument: string): void {
     if (argument !== '') {
@@ -861,6 +922,7 @@ export class TuiApp {
       { name: 'events', description: 'inspect raw session events' },
       { name: 'model', description: 'switch provider/model/effort' },
       { name: 'thinking', description: 'switch the reasoning level (off | low | high | max), alias: /effort' },
+      { name: 'mcp', description: 'list connected MCP servers and their tools' },
       { name: 'cwd', description: 'show or change the working directory' },
       { name: 'inbox', description: 'view and remove queued or steering input' },
       { name: 'fork', description: 'fork the current session and switch to it' },
@@ -954,6 +1016,10 @@ export class TuiApp {
     if (line === '/thinking' || line.startsWith('/thinking ') || line === '/effort' || line.startsWith('/effort ')) {
       const argument = line.startsWith('/thinking') ? line.slice(9).trim() : line.slice(7).trim()
       await this.pickThinking(argument)
+      return true
+    }
+    if (line === '/mcp') {
+      await this.showMcpServers()
       return true
     }
     if (line === '/inbox') {
