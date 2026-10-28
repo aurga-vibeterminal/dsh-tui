@@ -10,7 +10,9 @@
 - [Working with todos](#working-with-todos)
 - [Permissions & approvals](#permissions--approvals)
 - [Themes](#themes)
+- [Persisted settings](#persisted-settings)
 - [Exporting transcripts](#exporting-transcripts)
+- [Plugins & the web UI](#plugins--the-web-ui)
 - [Troubleshooting](#troubleshooting)
 
 ## Install & launch
@@ -123,6 +125,15 @@ There is no user-side todo editing; ask the agent to add, reorder, or complete i
 ## Exporting transcripts
 
 `/export` writes `dsh-tui-<session>.md` into the working directory (or `/export D:\notes\today.md`). The export contains the header metadata, user/assistant turns (reasoning collapsed into `<details>`), tool calls with their result digests, and notices.
+
+## Plugins & the web UI
+
+**Are the web UI's plugins available here?** In two layers:
+
+- **Everything in `dsh-base` is shared** — tools, the registry slash commands (`/compact`, `/goal`, `/plan`, `/feedback`, `/permission`), permission presets, approvals, subagents, compaction, the attachment service. They work in the TUI automatically, with no command or setup.
+- **Plugins installed into a specific profile are not shared.** Each profile (`web`, `tui`, `desktop`) is its own isolated pnpm workspace under `$DSH_HOME/profiles/<name>/`; a bundle installed into the web profile is invisible to the TUI profile, and vice versa.
+
+**Installing plugins in the TUI.** `dsh-base` ships a plugin-management tool the agent can call, so just ask in the conversation — "list this profile's plugins", "install <bundle>" (it requires Full access or per-call approval). The TUI profile disables HMR (a fullscreen app must not observe composition changes), so it is startup-only: **restart `dsh tui` after installing** for the change to take effect. Once installed, a plugin's tools render as tool cards, its slash commands appear in `/` completion, and its approval requests open the standard dialogs — no TUI-specific adaptation needed.
 
 ## Troubleshooting
 
