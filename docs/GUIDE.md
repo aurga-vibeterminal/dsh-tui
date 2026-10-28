@@ -1,6 +1,6 @@
-# Vibe Terminal — User Guide
+# DSH TUI — User Guide
 
-**Vibe Terminal** is a fullscreen agent console for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). This guide covers launching, keys, commands, and troubleshooting.
+**DSH TUIl** is a fullscreen agent console for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). This guide covers launching, keys, commands, and troubleshooting.
 
 - [Install & launch](#install--launch)
 - [Sessions](#sessions)
@@ -21,12 +21,12 @@
 
 ```sh
 dsh plugin --profile tui add D:\path\to\dsh-tui   # local path
-dsh plugin --profile tui add github:<org>/dsh-tui # git source
+dsh plugin --profile tui add github:aurga-vibeterminal/dsh-tui # git source
 dsh tui                                            # shorthand for dsh --profile tui
 dsh tui -r                                         # open the session picker at startup
 dsh tui -r session-xxxx                            # continue a stored session (alias --resume)
 dsh tui --preset ptc                               # agent mode: standard (default) | ptc | minimal | cordis
-dsh tui --model deepseek-account/deepseek-v4-flash # explicit model route
+dsh tui --model deepseek-account/deepseek-flash # explicit model route
 ```
 
 The profile composes `dsh-base` plus the TUI bundle; sessions are stored per working directory under your Harness home (`~/.dsh` by default).
