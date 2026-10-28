@@ -19,9 +19,11 @@ export interface TuiSettings {
   theme?: string
   /** UI locale id (`en` | `zh`). */
   locale?: string
+  /** Default model route for new sessions, as `provider/model`. */
+  model?: string
 }
 
-const SETTING_KEYS: readonly (keyof TuiSettings)[] = ['preset', 'theme', 'locale']
+const SETTING_KEYS: readonly (keyof TuiSettings)[] = ['preset', 'theme', 'locale', 'model']
 
 /** Absolute settings-file path under the resolved harness home. */
 export function tuiSettingsPath(): string {

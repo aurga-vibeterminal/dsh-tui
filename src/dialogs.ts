@@ -160,6 +160,9 @@ export class QuestionDialog implements Component {
         const mark = active.question.multiSelect === true ? (isSelected ? '[x] ' : '[ ] ') : ''
         const label = isCursor ? this.theme.accent(option.label) : option.label
         lines.push(truncateToWidth(`${prefix}${mark}${label}`, width))
+        if (option.description !== undefined && option.description !== '') {
+          lines.push(truncateToWidth(this.theme.dim(`       ${option.description}`), width))
+        }
       }
       const navigation = this.states.length > 1
         ? t('question.nav', { index: String(this.index + 1), total: String(this.states.length) })

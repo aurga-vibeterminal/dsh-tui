@@ -34,7 +34,7 @@ The profile composes `dsh-base` plus the TUI bundle; sessions are stored per wor
 - A session is created **only when you send the first message** — quitting without typing leaves nothing behind.
 - `/session` lists this directory's stored sessions (newest first) in a scrollable picker; pick one to switch (history replays). Hidden from the list: subagent child sessions, **archived** sessions (archive state is shared with the web UI), and **blank** sessions that never started a turn.
 - `/fork` branches the current session and switches onto the copy.
-- In the dsh **web** UI these sessions may appear under "ungrouped": the web groups sessions by *workspace attachment*, a web-profile concept this TUI does not compose. Grouping by project folder is a candidate upstream suggestion (PLAN §7.4).
+- In the dsh **web** UI these sessions may appear under "ungrouped": the web groups sessions by *workspace attachment*, a web-profile concept this TUI does not compose.
 
 ## Keyboard reference
 
@@ -118,7 +118,7 @@ There is no user-side todo editing; ask the agent to add, reorder, or complete i
 
 ## Persisted settings
 
-`/preset`, `/theme`, and `/language` write their choice to `$DSH_HOME/tui/settings.json` (default `~/.dsh/tui/settings.json`), so the preset mode, theme, and language survive restarts. Startup precedence is **CLI flag > saved setting > default** — `--preset ptc` overrides the saved preset for that run without rewriting it, and a missing or corrupt settings file is silently ignored (it is rewritten on the next change). A failed save only downgrades persistence for the current run and shows a notice; nothing else is affected.
+`/preset`, `/theme`, `/language`, and `/model` write their choice to `$DSH_HOME/tui/settings.json` (default `~/.dsh/tui/settings.json`), so the preset mode, theme, language, and default model route survive restarts. Startup precedence is **CLI flag > saved setting > default** — `--preset ptc` overrides the saved preset for that run without rewriting it, and a missing or corrupt settings file is silently ignored (it is rewritten on the next change). A failed save only downgrades persistence for the current run and shows a notice; nothing else is affected. The saved model applies to newly created sessions (`/new`, restarts); switching mid-session still applies hot to the next step.
 
 ## Exporting transcripts
 

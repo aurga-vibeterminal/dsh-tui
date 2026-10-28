@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { PickerDialog } from '../src/dialogs.ts'
+import { PickerDialog, QuestionDialog } from '../src/dialogs.ts'
 import { darkTheme } from '../src/theme.ts'
 
 const MODES = [
@@ -55,5 +55,26 @@ describe('PickerDialog', () => {
     const { dialog } = makePicker()
     dialog.handleInput('\x1b')
     await expect(dialog.done).resolves.toBeUndefined()
+  })
+})
+
+describe('QuestionDialog', () => {
+  it('renders option descriptions under their labels', () => {
+    const dialog = new QuestionDialog({
+      questions: [{
+        id: 'model',
+        question: 'Switch model',
+        options: [
+          { label: 'deepseek-account/deepseek-flash (👁)', description: 'DeepSeek V4.1 Flash' },
+          { label: 'deepseek-account/deepseek-v4-pro' },
+        ],
+      }],
+    }, darkTheme)
+    const lines = dialog.render(80)
+    expect(lines.some(line => line.includes('deepseek-flash (👁)'))).toBe(true)
+    expect(lines.some(line => line.includes('DeepSeek V4.1 Flash'))).toBe(true)
+    // The description follows its own option's label line directly.
+    const labelIndex = lines.findIndex(line => line.includes('deepseek-flash (👁)'))
+    expect(lines[labelIndex + 1]).toContain('DeepSeek V4.1 Flash')
   })
 })

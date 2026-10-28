@@ -23,10 +23,10 @@ async function withTempHome(body: () => Promise<void>): Promise<void> {
 }
 
 describe('persisted settings', () => {
-  it('round-trips preset, theme, and locale under $DSH_HOME/tui/settings.json', () => withTempHome(async () => {
-    await saveTuiSettings({ preset: 'ptc', theme: 'light', locale: 'zh' })
+  it('round-trips preset, theme, locale, and model under $DSH_HOME/tui/settings.json', () => withTempHome(async () => {
+    await saveTuiSettings({ preset: 'ptc', theme: 'light', locale: 'zh', model: 'deepseek-account/deepseek-flash' })
     expect(tuiSettingsPath()).toBe(join(process.env.DSH_HOME as string, 'tui', 'settings.json'))
-    await expect(loadTuiSettings()).resolves.toEqual({ preset: 'ptc', theme: 'light', locale: 'zh' })
+    await expect(loadTuiSettings()).resolves.toEqual({ preset: 'ptc', theme: 'light', locale: 'zh', model: 'deepseek-account/deepseek-flash' })
   }))
 
   it('returns {} when no settings file exists', () => withTempHome(async () => {

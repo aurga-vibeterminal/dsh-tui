@@ -142,6 +142,8 @@ export class TuiApp {
     private readonly preset: string,
     /** Preset chosen via /preset, applied to the next materialized session. */
     private pendingPreset: string | undefined,
+    /** Model route chosen via --model, settings, or /model; applied to newly created sessions. */
+    private pendingModel: DriverModelRoute | undefined,
     /** Persisted user settings ($DSH_HOME/tui/settings.json), mutated on change. */
     private settings: TuiSettings,
     private readonly disposers: Array<() => void>,
@@ -167,7 +169,13 @@ export class TuiApp {
     const preset = options.preset
       ?? (settings.preset !== undefined && PRESET_MODES.some(mode => mode.id === settings.preset) ? settings.preset : undefined)
       ?? 'standard'
-    const driver = await createDriver(ctx, model, { resume: options.resume, preset, model: options.model })
+    // Model route: CLI flag > saved setting > profile default (undefined).
+    const savedModelRaw = settings.model
+    const savedModel = savedModelRaw !== undefined && /^[^/\s]+\/[^/\s]+$/.test(savedModelRaw)
+      ? { provider: savedModelRaw.slice(0, savedModelRaw.indexOf('/')), model: savedModelRaw.slice(savedModelRaw.indexOf('/') + 1) }
+      : undefined
+    const modelRoute = options.model ?? savedModel
+    const driver = await createDriver(ctx, model, { resume: options.resume, preset, model: modelRoute })
 
     const stderr = new StderrCapture(log)
     stderr.install()
@@ -206,7 +214,7 @@ export class TuiApp {
     }
     tui.setFocus(editor)
 
-    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, themeRef, itemContext, log, preset, undefined, settings, [])
+    const app = new TuiApp(ctx, driver, tui, stderr, transcript, header, hints, editor, theme, themeRef, itemContext, log, preset, undefined, modelRoute, settings, [])
     app.wire(model)
     app.wireInteractions(ctx)
     app.wireCommands()
@@ -430,15 +438,14 @@ export class TuiApp {
     const currentRoute = `${this.driver.route.provider}/${this.driver.route.model}`
     const labels = new Map<string, ModelEntry>()
     const options = entries.map(entry => {
-      const label = `${entry.provider}/${entry.id}`
+      // Label: real route id plus a bracketed multimodal tag; the
+      // description line carries the catalog's display name (e.g.
+      // "DeepSeek V4.1 Flash" beside the id "deepseek-flash").
+      const label = `${entry.provider}/${entry.id}${entry.vision ? ` (👁 ${t('model.visionTag')})` : ''}`
       labels.set(label, entry)
-      const description = [
-        ...(entry.name === '' || entry.name === entry.id ? [] : [entry.name]),
-        ...(entry.vision ? ['👁 image input'] : []),
-      ].join(' · ')
       return {
         label,
-        ...(description === '' ? {} : { description }),
+        ...(entry.name === '' || entry.name === entry.id ? {} : { description: entry.name }),
       }
     })
     const dialog = new QuestionDialog({
@@ -478,6 +485,8 @@ export class TuiApp {
 
     try {
       this.driver.setModel({ provider: chosen.provider, model: chosen.id, reasoningEffort: effort })
+      this.pendingModel = { provider: chosen.provider, model: chosen.id }
+      this.persistSetting('model', `${chosen.provider}/${chosen.id}`)
       this.driver.model.pushNotice(`· model → ${chosen.provider}/${chosen.id}${effort === undefined ? '' : ` (effort ${effort})`}`)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
@@ -568,7 +577,7 @@ export class TuiApp {
     this.driver = await createDriver(this.ctx, model, {
       resume: undefined,
       preset: this.pendingPreset ?? this.preset,
-      model: undefined,
+      model: this.pendingModel,
       lazy: true,
     })
     this.refreshCommandAutocomplete()
@@ -683,13 +692,13 @@ export class TuiApp {
     }
     model.reset()
     try {
-      this.driver = await createDriver(this.ctx, model, { resume: sessionId, preset: this.pendingPreset ?? this.preset, model: undefined })
+      this.driver = await createDriver(this.ctx, model, { resume: sessionId, preset: this.pendingPreset ?? this.preset, model: this.pendingModel })
       this.refreshCommandAutocomplete()
       this.driver.model.pushNotice(`· switched to session ${sessionId.slice(0, 13)}…`)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       this.log.debug(`session resume failed: ${message}`)
-      this.driver = await createDriver(this.ctx, model, { resume: undefined, preset: this.pendingPreset ?? this.preset, model: undefined })
+      this.driver = await createDriver(this.ctx, model, { resume: undefined, preset: this.pendingPreset ?? this.preset, model: this.pendingModel })
       this.refreshCommandAutocomplete()
       this.driver.model.pushNotice(`· resume failed; started a fresh session (${message.slice(0, 100)})`, 'error')
     }
