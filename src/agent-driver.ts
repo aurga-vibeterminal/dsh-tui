@@ -64,7 +64,7 @@ export interface AgentDriver {
   /** Current live status of the whole agent. */
   readonly running: boolean
   /** Current selection route, live. */
-  get route(): { provider: string, model: string }
+  get route(): { provider: string, model: string, effort: string | undefined }
   /** Submit one user turn (creates the session on first use; queues while running). */
   send(input: string | readonly ContentBlock[]): Promise<void>
   /** Submit one steering message for the next step of the running turn. */
@@ -295,11 +295,14 @@ export async function createDriver(
     get running(): boolean {
       return running
     },
-    get route(): { provider: string, model: string } {
+    get route(): { provider: string, model: string, effort: string | undefined } {
       const current = selectionRef?.current
-      return current === undefined
-        ? { provider: selection.provider, model: selection.model }
-        : { provider: current.provider, model: current.model }
+      const active = current === undefined ? selection : current
+      return {
+        provider: active.provider,
+        model: active.model,
+        effort: active.reasoningEffort,
+      }
     },
     async send(input: string | readonly ContentBlock[]): Promise<void> {
       const wired = await ensureAgent()

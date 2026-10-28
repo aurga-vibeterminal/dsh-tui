@@ -407,7 +407,7 @@ export class TuiApp {
       this.driver.model.pushNotice('· llm service unavailable', 'error')
       return
     }
-    interface ModelEntry { provider: string, id: string, name: string, vision: boolean, efforts: readonly { id: string, name: string }[] }
+    interface ModelEntry { provider: string, id: string, name: string, vision: boolean }
     const entries: ModelEntry[] = []
     try {
       for (const provider of llm.listProviders()) {
@@ -422,7 +422,6 @@ export class TuiApp {
             id: info.id,
             name: info.name,
             vision: info.inputModalities?.includes('image') === true,
-            efforts: info.reasoning?.efforts ?? [],
           })
         }
       }
@@ -460,16 +459,28 @@ export class TuiApp {
     const chosen = labels.get(chosenLabel)
     if (chosen === undefined) return
 
-    // Effort follow-up when the model offers more than one.
+    // Effort follow-up when the model offers more than one. The ladder (with
+    // display names) comes from resolveModelInfo's connection defaults — raw
+    // listModels entries carry no reasoning metadata.
     let effort: string | undefined
-    if (chosen.efforts.length > 1) {
+    let efforts: readonly { id: string, name: string, description?: string }[] = []
+    try {
+      const info = await llm.resolveModelInfo(chosen.provider, chosen.id) as {
+        reasoning?: { efforts?: readonly { id: string, name: string, description?: string }[] }
+      }
+      efforts = info.reasoning?.efforts ?? []
+    } catch {
+      efforts = []
+    }
+    if (efforts.length > 1) {
+      const labelOf = (candidate: { id: string, name: string }): string => displayEffort(candidate)
       const effortDialog = new QuestionDialog({
         questions: [{
           id: 'effort',
           question: t('dialog.effortTitle', { model: chosen.id }),
-          options: chosen.efforts.map(candidate => ({
-            label: candidate.name === '' ? candidate.id : candidate.name,
-            description: candidate.id,
+          options: efforts.map(candidate => ({
+            label: labelOf(candidate),
+            ...(candidate.description === undefined ? {} : { description: candidate.description }),
           })),
         }],
       }, this.theme)
@@ -478,7 +489,7 @@ export class TuiApp {
       if (effortLabel === undefined) {
         this.driver.model.pushNotice('· effort picker cancelled; keeping the default')
       } else {
-        const found = chosen.efforts.find(candidate => (candidate.name === '' ? candidate.id : candidate.name) === effortLabel)
+        const found = efforts.find(candidate => labelOf(candidate) === effortLabel)
         effort = found?.id
       }
     }
@@ -492,6 +503,79 @@ export class TuiApp {
       const message = error instanceof Error ? error.message : String(error)
       this.driver.model.pushNotice(`· model switch failed: ${message.slice(0, 140)}`, 'error')
     }
+  }
+
+  /** /thinking [level]: runtime reasoning-effort switch (off | low | high | max). */
+  private async pickThinking(argument: string): Promise<void> {
+    const llm = this.ctx.get('llm')
+    if (llm === undefined) {
+      this.driver.model.pushNotice('· llm service unavailable', 'error')
+      return
+    }
+    const route = this.driver.route
+    let efforts: readonly { id: string, name: string, description?: string }[] = []
+    let defaultEffort: string | undefined
+    try {
+      // resolveModelInfo materializes the effort ladder (with display names)
+      // from connection defaults; raw listModels entries carry no reasoning.
+      const info = await llm.resolveModelInfo(route.provider, route.model) as {
+        reasoning?: { efforts?: readonly { id: string, name: string, description?: string }[], defaultEffort?: string }
+      }
+      efforts = info.reasoning?.efforts ?? []
+      defaultEffort = info.reasoning?.defaultEffort
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.driver.model.pushNotice(`· model info failed: ${message.slice(0, 140)}`, 'error')
+      return
+    }
+    if (efforts.length === 0) {
+      this.driver.model.pushNotice(t('notice.thinkingUnsupported', { model: route.model }))
+      return
+    }
+    if (efforts.length === 1) {
+      this.driver.model.pushNotice(t('notice.thinkingSingle', { model: route.model, effort: displayEffort(efforts[0]!) }))
+      return
+    }
+    if (argument !== '') {
+      const direct = efforts.find(candidate => candidate.id === argument)
+      if (direct === undefined) {
+        this.driver.model.pushNotice(t('notice.thinkingInvalid', { effort: argument }), 'error')
+        return
+      }
+      this.applyThinking(direct.id)
+      return
+    }
+    const current = route.effort ?? defaultEffort
+    const labelOf = (candidate: { id: string, name: string }): string =>
+      `${candidate.id === current ? '● ' : ''}${displayEffort(candidate)}`
+    const dialog = new QuestionDialog({
+      questions: [{
+        id: 'thinking',
+        question: t('dialog.thinkingTitle', { effort: current === undefined ? '—' : displayEffort({ id: current, name: '' }) }),
+        options: efforts.map(candidate => ({
+          label: labelOf(candidate),
+          ...(candidate.description === undefined ? {} : { description: candidate.description }),
+        })),
+      }],
+    }, this.theme)
+    const answer = await this.showDialog(dialog)
+    const label = answer.answers[0]?.selected[0]
+    if (label === undefined) {
+      this.driver.model.pushNotice(t('notice.thinkingCancelled'))
+      return
+    }
+    const chosen = efforts.find(candidate => labelOf(candidate) === label)
+    if (chosen !== undefined) this.applyThinking(chosen.id)
+  }
+
+  private applyThinking(effort: string): void {
+    const route = this.driver.route
+    if (effort === route.effort) {
+      this.driver.model.pushNotice(t('notice.thinkingStays', { effort: displayEffort({ id: effort, name: '' }) }))
+      return
+    }
+    this.driver.setModel({ provider: route.provider, model: route.model, reasoningEffort: effort })
+    this.driver.model.pushNotice(t('notice.thinkingChange', { effort: displayEffort({ id: effort, name: '' }) }))
   }
 
   /** /preset: preset picker; /preset <id>: apply directly. Applies to the next session. */
@@ -776,6 +860,7 @@ export class TuiApp {
       { name: 'resume', description: 'switch to a stored session (alias: session)' },
       { name: 'events', description: 'inspect raw session events' },
       { name: 'model', description: 'switch provider/model/effort' },
+      { name: 'thinking', description: 'switch the reasoning level (off | low | high | max), alias: /effort' },
       { name: 'cwd', description: 'show or change the working directory' },
       { name: 'inbox', description: 'view and remove queued or steering input' },
       { name: 'fork', description: 'fork the current session and switch to it' },
@@ -864,6 +949,11 @@ export class TuiApp {
     }
     if (line === '/model' || line === '/models') {
       await this.pickModel()
+      return true
+    }
+    if (line === '/thinking' || line.startsWith('/thinking ') || line === '/effort' || line.startsWith('/effort ')) {
+      const argument = line.startsWith('/thinking') ? line.slice(9).trim() : line.slice(7).trim()
+      await this.pickThinking(argument)
       return true
     }
     if (line === '/inbox') {
@@ -1282,6 +1372,12 @@ function headerLine(model: TranscriptModel, theme: Theme): string {
 
 function hintsLine(driver: AgentDriver, theme: Theme): string {
   return theme.dim(driver.running ? t('hint.running') : t('hint.idle'))
+}
+
+/** Human-readable effort label: the catalog display name, else the capitalized id. */
+function displayEffort(effort: { id: string, name: string }): string {
+  if (effort.name !== '') return effort.name
+  return effort.id === '' ? effort.id : `${effort.id[0]!.toUpperCase()}${effort.id.slice(1)}`
 }
 
 function truncate(text: string, max: number): string {
