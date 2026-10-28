@@ -122,7 +122,7 @@ export class TranscriptView implements Component {
 function snapshotKey(item: TranscriptItem): string {
   switch (item.kind) {
     case 'user':
-      return `user|${item.text}`
+      return `user|${item.text}|${(item.images ?? []).map(image => `${image.name}:${String(image.width)}x${String(image.height)}`).join(',')}`
     case 'assistant':
       return `assistant|${item.live ? 'live' : 'set'}|${item.text}|${firstLine(item.reasoning, 72)}`
     case 'tool':
@@ -165,9 +165,17 @@ function viewTitle(view: ToolResultView): string | undefined {
 function createItemComponent(item: TranscriptItem, context: ItemContext): Component {
   const { theme, markdownTheme } = context
   switch (item.kind) {
-    case 'user':
+    case 'user': {
       // OSC 133 prompt marker: enables Ctrl+Up/Down jumps between user turns.
-      return new MarkedPrompt(new Text(theme.user('❯ ') + item.text, 0, 0))
+      const chips = item.images === undefined ? [] : item.images.map(
+        image => theme.dim(`  🖼 ${image.name} · ${String(image.width)}×${String(image.height)}`),
+      )
+      const body = new Text(theme.user('❯ ') + item.text, 0, 0)
+      const component = chips.length === 0
+        ? body
+        : new Compound([body, new Text(chips.join('\n'), 0, 0)])
+      return new MarkedPrompt(component)
+    }
     case 'assistant': {
       const reasoning = item.reasoning === ''
         ? []

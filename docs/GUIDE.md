@@ -85,6 +85,8 @@ Commands registered by the runtime profile (e.g. from plugins) are dispatched th
 
 ## File references in prompts
 
+`@` autocompletes paths; image file paths (`.png` `.jpg` `.jpeg` `.webp` `.gif`, quoted or bare) that exist on disk are **admitted as real image attachments** through the same pipeline the web upload flow uses — the model sees the pixels, not just the path. Sending is blocked up front when the current model declares no image input (`/model` → `deepseek-flash` supports vision); the notice explains, and the unsent text is recoverable with the up-arrow history. Nonexistent paths fall back to plain text.
+
 - `@query` — fuzzy file search. **Type a space before `@`** (CJK characters are not word boundaries in the editor's trigger rules): `打开 @PLAN` works, `打开@PLAN` does not. `@` also works at line start or after CJK punctuation.
 - `Tab` — force path completion anywhere in the line (`./`, `../`, `~/`, absolute, or a bare name).
 - `@"path with spaces.md"` — quoted form.

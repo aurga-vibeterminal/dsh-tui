@@ -54,7 +54,7 @@ export type ToolStatus = 'running' | 'ok' | 'error'
 
 /** The renderable transcript items, in order. */
 export type TranscriptItem =
-  | { kind: 'user'; id: string; text: string }
+  | { kind: 'user'; id: string; text: string; images?: readonly { name: string, width: number, height: number }[] }
   | { kind: 'assistant'; id: string; live: boolean; text: string; reasoning: string; usage: AssistantUsage | undefined }
   | { kind: 'tool'; id: string; callId: string; live: boolean; name: string; argDigest: string; rawArgs: string; status: ToolStatus; resultDigest: string | undefined; callView: ToolCallView | undefined; resultView: ToolResultView | undefined; expanded: boolean }
   | { kind: 'notice'; id: string; text: string; tone: 'dim' | 'error' }
@@ -329,6 +329,15 @@ export class TranscriptModel {
         // and other injected user-role facts stay invisible.
         if (event.data.source.kind !== 'user') return
         this.dropQueuedNotices()
+        const images = (event.data.content as readonly { type?: string, attachment?: { name?: string, attachmentId?: unknown, width?: number, height?: number } }[])
+          .filter(block => block.type === 'image'
+            && typeof block.attachment?.width === 'number'
+            && typeof block.attachment?.height === 'number')
+          .map(block => ({
+            name: block.attachment!.name ?? String(block.attachment!.attachmentId ?? 'image'),
+            width: block.attachment!.width!,
+            height: block.attachment!.height!,
+          }))
         this.items.push({
           kind: 'user',
           id: `u${this.idCounter++}`,
@@ -336,6 +345,7 @@ export class TranscriptModel {
             .filter(block => block.type === 'text')
             .map(block => (block.type === 'text' ? block.text : ''))
             .join(''),
+          ...(images.length === 0 ? {} : { images }),
         })
         break
       }

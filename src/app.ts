@@ -48,6 +48,8 @@ import { THEME_NAMES, markdownThemeFor, selectListThemeFor, themeByName, type Th
 import { writeFile } from 'node:fs/promises'
 import { availableLocales, initSystemLocale, knownLocales, locale, permissionDisplayName, setLocale, t } from './i18n.ts'
 import { loadTuiSettings, saveTuiSettings, type TuiSettings } from './settings.ts'
+import { admitImages, detectImagePaths, modelAcceptsImages, visionCapableModels } from './images.ts'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { createDebugLogger, StderrCapture, type Logger } from './util/log.ts'
 import packageInfo from '../package.json'
 
@@ -397,16 +399,23 @@ export class TuiApp {
       this.driver.model.pushNotice('· llm service unavailable', 'error')
       return
     }
-    interface ModelEntry { provider: string, id: string, name: string, efforts: readonly { id: string, name: string }[] }
+    interface ModelEntry { provider: string, id: string, name: string, vision: boolean, efforts: readonly { id: string, name: string }[] }
     const entries: ModelEntry[] = []
     try {
       for (const provider of llm.listProviders()) {
         const models = await llm.listModels(provider.id) as readonly {
           provider: string, id: string, name: string,
+          inputModalities?: readonly string[],
           reasoning?: { efforts?: readonly { id: string, name: string }[] }
         }[]
         for (const info of models) {
-          entries.push({ provider: info.provider, id: info.id, name: info.name, efforts: info.reasoning?.efforts ?? [] })
+          entries.push({
+            provider: info.provider,
+            id: info.id,
+            name: info.name,
+            vision: info.inputModalities?.includes('image') === true,
+            efforts: info.reasoning?.efforts ?? [],
+          })
         }
       }
     } catch (error: unknown) {
@@ -423,9 +432,13 @@ export class TuiApp {
     const options = entries.map(entry => {
       const label = `${entry.provider}/${entry.id}`
       labels.set(label, entry)
+      const description = [
+        ...(entry.name === '' || entry.name === entry.id ? [] : [entry.name]),
+        ...(entry.vision ? ['👁 image input'] : []),
+      ].join(' · ')
       return {
         label,
-        ...(entry.name === '' || entry.name === entry.id ? {} : { description: entry.name }),
+        ...(description === '' ? {} : { description }),
       }
     })
     const dialog = new QuestionDialog({
@@ -1117,10 +1130,61 @@ export class TuiApp {
         .catch((error: unknown) => this.reportSubmitFailure(error))
       return
     }
+    // Image paths in the text are admitted as real attachments (the web
+    // upload pipeline) instead of leaving the model to guess at a path.
+    if (detectImagePaths(trimmed).length > 0) {
+      void this.submitWithImages(trimmed)
+      return
+    }
     if (this.driver.running) this.driver.model.pushNotice(t('notice.queued', { text: firstLineOf(trimmed) }))
     this.driver.send(trimmed)
       .then(() => this.refreshCommandAutocomplete())
       .catch((error: unknown) => this.reportSubmitFailure(error))
+  }
+
+  /** Send one message after admitting its image paths as attachments. */
+  private async submitWithImages(trimmed: string): Promise<void> {
+    const route = this.driver.route
+    const accepts = await modelAcceptsImages(this.ctx, route.provider, route.model)
+    if (accepts === false) {
+      const capable = await visionCapableModels(this.ctx, route.provider)
+      this.driver.model.pushNotice(
+        t('notice.modelNotVision', {
+          model: route.model,
+          models: capable.length > 0 ? capable.join(', ') : t('notice.modelNotVisionNone'),
+        }),
+        'error',
+      )
+      return
+    }
+    const { images, missing, failed } = await admitImages(this.ctx, detectImagePaths(trimmed))
+    for (const path of missing) {
+      this.driver.model.pushNotice(t('notice.imageMissing', { path }), 'error')
+    }
+    for (const failure of failed) {
+      this.driver.model.pushNotice(t('notice.imageAdmitFailed', { path: failure.path, message: failure.message.slice(0, 120) }), 'error')
+    }
+    if (images.length === 0) {
+      // Nothing stored: fall back to the plain text so the message still goes out.
+      if (this.driver.running) this.driver.model.pushNotice(t('notice.queued', { text: firstLineOf(trimmed) }))
+      await this.driver.send(trimmed)
+      await this.refreshCommandAutocomplete()
+      return
+    }
+    const content: readonly ContentBlock[] = [
+      { type: 'text', text: trimmed },
+      ...images.map(image => ({ type: 'image' as const, attachment: image.attachment })),
+    ]
+    for (const image of images) {
+      this.driver.model.pushNotice(t('notice.imageAttached', {
+        name: image.attachment.name ?? 'image',
+        width: String(image.attachment.width),
+        height: String(image.attachment.height),
+      }))
+    }
+    if (this.driver.running) this.driver.model.pushNotice(t('notice.queued', { text: firstLineOf(trimmed) }))
+    await this.driver.send(content)
+    await this.refreshCommandAutocomplete()
   }
 
   private reportSubmitFailure(error: unknown): void {
@@ -1251,6 +1315,9 @@ function renderTranscriptMarkdown(model: TranscriptModel, sessionId: string): st
     switch (item.kind) {
       case 'user':
         lines.push('## ❯ user', '', item.text, '')
+        for (const image of item.images ?? []) {
+          lines.push(`> 🖼 ${image.name} · ${String(image.width)}×${String(image.height)}`, '')
+        }
         break
       case 'assistant': {
         lines.push('## assistant', '')

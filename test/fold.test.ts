@@ -180,6 +180,24 @@ describe('TranscriptModel · notices and unknown events', () => {
     expect(model.status.preset).toBe('danger-full-access')
   })
 
+  it('folds image attachment blocks of user messages into the item', () => {
+    const model = new TranscriptModel()
+    model.applyEvent({
+      type: 'user/message', seq: 1, time: 0,
+      data: {
+        content: [
+          { type: 'text', text: '参考这张图' },
+          { type: 'image', attachment: { attachmentId: 'att-1', name: 'shot.png', width: 640, height: 480, bytes: 1234 } },
+        ],
+        source: { kind: 'user' }, role: 'user', id: 'u1',
+      },
+    } as unknown as SessionEvent)
+    const item = model.items.find(candidate => candidate.kind === 'user')
+    expect(item).toBeDefined()
+    expect(item !== undefined && item.kind === 'user' ? item.images : undefined)
+      .toEqual([{ name: 'shot.png', width: 640, height: 480 }])
+  })
+
   it('tracks model and working-directory switches as notices', () => {
     const model = new TranscriptModel()
     model.applyEvent({ type: 'model/selection', seq: 1, time: 0, data: { selection: { provider: 'deepseek-account', model: 'deepseek-v4-pro' } } } as unknown as SessionEvent)

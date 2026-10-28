@@ -20,7 +20,7 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-fs'
 import { createUserMessage, MessageId, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
@@ -66,9 +66,9 @@ export interface AgentDriver {
   /** Current selection route, live. */
   get route(): { provider: string, model: string }
   /** Submit one user turn (creates the session on first use; queues while running). */
-  send(text: string): Promise<void>
+  send(input: string | readonly ContentBlock[]): Promise<void>
   /** Submit one steering message for the next step of the running turn. */
-  steer(text: string): Promise<void>
+  steer(input: string | readonly ContentBlock[]): Promise<void>
   /** Switch the model for the next step. */
   setModel(switchTo: ModelSwitch): void
   /** Set the agent preset applied when the (lazy) session materializes. */
@@ -272,17 +272,17 @@ export async function createDriver(
         ? { provider: selection.provider, model: selection.model }
         : { provider: current.provider, model: current.model }
     },
-    async send(text: string): Promise<void> {
+    async send(input: string | readonly ContentBlock[]): Promise<void> {
       const wired = await ensureAgent()
       wired.followup(createUserMessage({
-        content: [{ type: 'text', text }],
+        content: typeof input === 'string' ? [{ type: 'text', text: input }] : input,
         source: { kind: 'user' },
       }))
     },
-    async steer(text: string): Promise<void> {
+    async steer(input: string | readonly ContentBlock[]): Promise<void> {
       const wired = await ensureAgent()
       wired.steer(createUserMessage({
-        content: [{ type: 'text', text }],
+        content: typeof input === 'string' ? [{ type: 'text', text: input }] : input,
         source: { kind: 'user' },
       }))
     },
