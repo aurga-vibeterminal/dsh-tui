@@ -78,6 +78,7 @@ class ComposerAutocomplete implements AutocompleteProvider {
     private readonly inner: CombinedAutocompleteProvider,
     private readonly basePath: string,
     private readonly fdPath: string | null,
+    private readonly skills: () => readonly { name: string, description: string }[],
   ) {}
 
   async getSuggestions(
@@ -88,6 +89,22 @@ class ComposerAutocomplete implements AutocompleteProvider {
   ): Promise<AutocompleteSuggestions | null> {
     const before = (lines[cursorLine] ?? '').slice(0, cursorCol)
     if (before.trim() === '' && options.force !== true) return null
+    // The # trigger inserts skill references anywhere in the draft (no
+    // submit-on-accept — that behavior belongs to / commands alone).
+    const hashToken = tokenAfterSeparators(before)
+    if (hashToken !== null && hashToken.startsWith('#') && !hashToken.startsWith('#"')) {
+      const query = hashToken.slice(1).toLowerCase()
+      const items = this.skills()
+        .filter(skill => skill.name.toLowerCase().includes(query))
+        .slice(0, 20)
+        .map(skill => ({
+          label: skill.name,
+          value: `#${skill.name}`,
+          ...(skill.description === '' ? {} : { description: `🛠 ${skill.description}` }),
+        }))
+      if (items.length === 0) return null
+      return { items, prefix: hashToken }
+    }
     // pi-tui's @ fuzzy search silently returns nothing without the fd binary;
     // answer the @ branch from our bounded walk instead.
     if (this.fdPath === null) {
@@ -108,6 +125,18 @@ class ComposerAutocomplete implements AutocompleteProvider {
     item: AutocompleteItem,
     prefix: string,
   ): { lines: string[], cursorLine: number, cursorCol: number } {
+    if (prefix.startsWith('#') && !prefix.startsWith('#"')) {
+      const currentLine = lines[cursorLine] ?? ''
+      const before = currentLine.slice(0, cursorCol - prefix.length)
+      const after = currentLine.slice(cursorCol)
+      const replacement = `${item.value} `
+      const nextLine = `${before}${replacement}${after}`
+      return {
+        lines: lines.map((line, index) => (index === cursorLine ? nextLine : line)),
+        cursorLine,
+        cursorCol: before.length + replacement.length,
+      }
+    }
     return this.inner.applyCompletion(lines, cursorLine, cursorCol, item, prefix)
   }
 }
@@ -116,6 +145,14 @@ class ComposerAutocomplete implements AutocompleteProvider {
 function tokenAfterSeparators(before: string): string | null {
   const match = /([^\s,;:（）「」【】、，。；：'"=]+)$/.exec(before)
   return match === null ? null : match[1]!
+}
+
+/** Expand #skill-name references to the model's <skill> tags; known names only. */
+export function expandSkillReferences(text: string, roster: readonly { name: string }[]): string {
+  if (!text.includes('#')) return text
+  const known = new Set(roster.map(skill => skill.name))
+  return text.replace(/(^|\s)#([A-Za-z0-9][A-Za-z0-9_-]*)/g, (whole, lead: string, name: string) =>
+    known.has(name) ? `${lead}<skill>${name}</skill>` : whole)
 }
 
 const PRESET_MODES = [
@@ -578,6 +615,81 @@ export class TuiApp {
     this.driver.model.pushNotice(t('notice.thinkingChange', { effort: displayEffort({ id: effort, name: '' }) }))
   }
 
+  /** /skill [name]: two-level skill browser (list → detail with body preview). */
+  private async showSkills(argument: string): Promise<void> {
+    const skills = this.ctx.get('skills') as {
+      list(options?: { cwd?: string }): Promise<readonly {
+        name: string, description: string, whenToUse?: string, path?: string, source: string, provider: string
+      }[]>
+      get(name: string, options?: { cwd?: string }): Promise<{ content: string }>
+    } | undefined
+    if (skills === undefined) {
+      this.driver.model.pushNotice(t('notice.skillUnavailable'), 'error')
+      return
+    }
+    let summaries: readonly {
+      name: string, description: string, whenToUse?: string, path?: string, source: string, provider: string
+    }[] = []
+    try {
+      summaries = await skills.list({ cwd: process.cwd() })
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.driver.model.pushNotice(t('notice.skillListFailed', { message: message.slice(0, 140) }), 'error')
+      return
+    }
+    if (summaries.length === 0) {
+      this.driver.model.pushNotice(t('notice.skillNone'))
+      return
+    }
+    const openDetail = async (name: string): Promise<void> => {
+      const summary = summaries.find(entry => entry.name === name)
+      if (summary === undefined) return
+      const rows = [
+        `${summary.description}`,
+        '',
+        `${t('skill.usage')}: /${summary.name} <${t('skill.taskPlaceholder')}>`,
+        `${t('skill.source')}: ${summary.source} · ${summary.provider}`,
+        ...(summary.path === undefined ? [] : [`${t('skill.path')}: ${summary.path}`]),
+        ...(summary.whenToUse === undefined || summary.whenToUse === '' ? [] : ['', `${t('skill.whenToUse')}: ${summary.whenToUse}`]),
+      ]
+      try {
+        const definition = await skills.get(name, { cwd: process.cwd() })
+        const body = definition.content.split('\n').slice(0, 24)
+        rows.push('', `${t('skill.body')} ─────`, ...body)
+      } catch {
+        // Detail body is best-effort; the summary still renders.
+      }
+      await this.showDialog(new ListDialog(t('dialog.skillDetailTitle', { name }), rows, this.theme))
+    }
+    if (argument !== '') {
+      if (!summaries.some(entry => entry.name === argument)) {
+        this.driver.model.pushNotice(t('notice.skillUnknown', { name: argument }), 'error')
+        return
+      }
+      await openDetail(argument)
+      return
+    }
+    // Level 1: the skill list; Enter drills into one skill, closing the
+    // detail returns to the list, Esc on the list exits.
+    for (;;) {
+      const picker = new PickerDialog(
+        t('dialog.skillTitle'),
+        summaries.map(summary => ({
+          value: summary.name,
+          label: summary.name,
+          ...(summary.description === '' ? {} : { description: summary.description }),
+        })),
+        this.theme,
+        () => this.tui.requestRender(),
+        '↑↓ move · enter details · esc close',
+        12,
+      )
+      const name = await this.showDialog(picker)
+      if (name === undefined) return
+      await openDetail(name)
+    }
+  }
+
   /** /reload: reconcile the profile composition in place (new plugin rows, config) without restarting. */
   private async reloadComposition(): Promise<void> {
     const hmr = this.ctx.get('hmr') as {
@@ -944,6 +1056,9 @@ export class TuiApp {
     }))
   }
 
+  private userSkills: readonly { name: string, description: string }[] = []
+  private skillsRefreshed = false
+
   private refreshCommandAutocomplete(): void {
     const commands = this.ctx.get('commands')
     const localItems = [
@@ -959,6 +1074,7 @@ export class TuiApp {
       { name: 'thinking', description: 'switch the reasoning level (off | low | high | max), alias: /effort' },
       { name: 'mcp', description: 'list connected MCP servers and their tools' },
       { name: 'reload', description: 'apply profile composition changes (new plugin/MCP rows) without restarting' },
+      { name: 'skill', description: 'browse available skills and inspect their instructions (alias: /skills)' },
       { name: 'cwd', description: 'show or change the working directory' },
       { name: 'inbox', description: 'view and remove queued or steering input' },
       { name: 'fork', description: 'fork the current session and switch to it' },
@@ -981,12 +1097,38 @@ export class TuiApp {
         this.log.debug(`command list failed: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
+    // Skills moved to the dedicated # trigger (see ComposerAutocomplete):
+    // / stays commands-only so Enter keeps meaning "run this command".
     const fdPath = resolveFdPath()
     this.editor.setAutocompleteProvider(new ComposerAutocomplete(
       new CombinedAutocompleteProvider(localItems, process.cwd(), fdPath),
       process.cwd(),
       fdPath,
+      () => this.userSkills,
     ))
+    if (!this.skillsRefreshed) {
+      this.skillsRefreshed = true
+      void this.refreshUserSkills()
+    }
+  }
+
+  /** Load the user-invocable skill roster behind the /<skill-name> gesture. */
+  private async refreshUserSkills(): Promise<void> {
+    const skills = this.ctx.get('skills') as {
+      list(options?: { cwd?: string }): Promise<readonly {
+        name: string, description: string, invocation?: { userInvocable?: boolean }
+      }[]>
+    } | undefined
+    if (skills === undefined) return
+    try {
+      const discovered = await skills.list({ cwd: process.cwd() })
+      this.userSkills = discovered
+        .filter(skill => skill.invocation?.userInvocable === true)
+        .map(skill => ({ name: skill.name, description: skill.description }))
+      this.refreshCommandAutocomplete()
+    } catch (error: unknown) {
+      this.log.debug(`skill roster failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   /** Dispatch one submitted line; returns true when consumed as a command. */
@@ -1062,6 +1204,10 @@ export class TuiApp {
       await this.reloadComposition()
       return true
     }
+    if (line === '/skill' || line.startsWith('/skill ') || line === '/skills') {
+      await this.showSkills(line === '/skills' ? '' : line.slice(7).trim())
+      return true
+    }
     if (line === '/inbox') {
       await this.pickInboxMessage()
       return true
@@ -1096,6 +1242,16 @@ export class TuiApp {
         return true
       }
       return this.pickPermissionPreset()
+    }
+    // /<skill-name> … is the harness's user invocation gesture, not a command:
+    // send it as a message; the first line deterministically loads the skill.
+    const firstWord = line.split(/\s/)[0] ?? ''
+    if (firstWord.length > 1 && this.userSkills.some(skill => skill.name === firstWord.slice(1))) {
+      if (this.driver.running) this.driver.model.pushNotice(t('notice.queued', { text: firstLineOf(line) }))
+      this.driver.send(line)
+        .then(() => this.refreshCommandAutocomplete())
+        .catch((error: unknown) => this.reportSubmitFailure(error))
+      return true
     }
     // Runtime (profile/plugin) registry commands need the agent.
     if (!this.driver.hasAgent) {
@@ -1321,28 +1477,32 @@ export class TuiApp {
 
   /** One submission path for Enter (send/queue) and Alt+S (steer). */
   private submitText(trimmed: string, steer: boolean): void {
+    // #skill-name references expand to the model's <skill> representation
+    // (the same form the web's reference serialization produces); known
+    // names only, so prose hashtags and C# stay untouched.
+    const expanded = expandSkillReferences(trimmed, this.userSkills)
     this.editor.addToHistory(trimmed)
-    if (trimmed.startsWith('/')) {
-      void this.dispatchCommand(trimmed).catch((error: unknown) => {
+    if (expanded.startsWith('/')) {
+      void this.dispatchCommand(expanded).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error)
         this.driver.model.pushNotice(`· command failed: ${message.slice(0, 120)}`, 'error')
       })
       return
     }
     if (steer) {
-      this.driver.steer(trimmed)
-        .then(() => { this.driver.model.pushNotice(t('notice.steering', { text: firstLineOf(trimmed) })) })
+      this.driver.steer(expanded)
+        .then(() => { this.driver.model.pushNotice(t('notice.steering', { text: firstLineOf(expanded) })) })
         .catch((error: unknown) => this.reportSubmitFailure(error))
       return
     }
     // Image paths in the text are admitted as real attachments (the web
     // upload pipeline) instead of leaving the model to guess at a path.
-    if (detectImagePaths(trimmed).length > 0) {
-      void this.submitWithImages(trimmed)
+    if (detectImagePaths(expanded).length > 0) {
+      void this.submitWithImages(expanded)
       return
     }
-    if (this.driver.running) this.driver.model.pushNotice(t('notice.queued', { text: firstLineOf(trimmed) }))
-    this.driver.send(trimmed)
+    if (this.driver.running) this.driver.model.pushNotice(t('notice.queued', { text: firstLineOf(expanded) }))
+    this.driver.send(expanded)
       .then(() => this.refreshCommandAutocomplete())
       .catch((error: unknown) => this.reportSubmitFailure(error))
   }

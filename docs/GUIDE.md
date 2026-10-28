@@ -75,6 +75,9 @@ TUI-local commands (always available):
 | `/thinking [level]` | Switch the reasoning level standalone — `off` / `low` / `high` / `max` (what the current model offers; same switch the web's model card makes, alias: `/effort`) |
 | `/mcp` | Two-level MCP browser: pick a server, Enter drills into its status and tools; a server appears once its initial connection and tool sync succeeded |
 | `/reload` | Re-read the profile composition and apply changes in place — new plugin/MCP rows mount without restarting; module-code changes still report a restart |
+| `/skill [name]` | Two-level skill browser: skills discovered from the project (`.agents/skills`) and the user home (`~/.agents/skills`); Enter inspects description, source, and the instruction body — the model loads these itself through its `skill` tool (alias: `/skills`) |
+
+**Invoking a skill directly.** Type `#` anywhere in the composer to insert a skill reference (`#skill-name`, marked `🛠` in the suggestions — plain insertion, it never submits); on send the reference expands to the model's `<skill>` form so the model loads it for that task. A message whose first line is `/<skill-name> <task>` is the harness's deterministic invocation gesture — the skill's instructions load into that step without asking the model to find it.
 | `/preset [id]` | Show or set the agent preset mode — `standard` / `ptc` / `minimal` / `cordis` (applies to the next session; same modes as the web UI) |
 | `/cwd [path]` | Show or change the session working directory |
 | `/inbox` | View and remove queued or steering input |
