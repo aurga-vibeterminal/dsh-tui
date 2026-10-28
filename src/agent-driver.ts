@@ -215,10 +215,39 @@ export async function createDriver(
       installModelSelection(agentCtx, selected)
     }
     if (options.resume === undefined) {
+      // Group placement: the workspace registry keys groups by canonical path
+      // and idempotently reuses an existing one, titling new groups with the
+      // directory's final segment — the same rule the web UI's groups follow.
+      // A session born under the group's directory attaches to the group; any
+      // registry failure degrades to an ungrouped session, never blocking chat.
+      let sessionCwd = cwd
+      let workspaceAttach: ((sessionId: string) => Promise<void>) | undefined
+      const registry = ctx.get('workspaceRegistry') as {
+        create(path: string): Promise<{
+          path: string
+          attachSession(sessionId: unknown): Promise<void>
+        }>
+      } | undefined
+      if (registry !== undefined) {
+        try {
+          const workspace = await registry.create(cwd)
+          sessionCwd = workspace.path
+          workspaceAttach = async sessionId => workspace.attachSession(sessionId)
+        } catch {
+          // Grouping is metadata; chat proceeds ungrouped.
+        }
+      }
       const sessionId = brandString<SessionId>(`session-${randomUUID()}`)
-      const meta: { cwd: string; agentPreset?: string } = { cwd }
+      const meta: { cwd: string; agentPreset?: string } = { cwd: sessionCwd }
       if (driverPreset !== undefined) meta.agentPreset = driverPreset
       handle = await agents.create({ sessionId, meta: meta as never, agentOptions: agentOptions(), setup })
+      if (workspaceAttach !== undefined) {
+        try {
+          await workspaceAttach(String(handle.agent.id))
+        } catch {
+          // Attached grouping is best-effort; the session stays usable.
+        }
+      }
     } else {
       if (ctx.get('sessionPersistence') === undefined) {
         throw new Error('tui --resume requires the sessionPersistence service; dsh-base provides it')

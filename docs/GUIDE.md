@@ -34,9 +34,10 @@ The profile composes `dsh-base` plus the TUI bundle; sessions are stored per wor
 ## Sessions
 
 - A session is created **only when you send the first message** — quitting without typing leaves nothing behind.
+- New sessions are placed in a **group** named after the working directory's final segment (e.g. `D:\projects\dsh-tui` → group `dsh-tui`), using the same workspace registry the web UI's sidebar groups follow. The group is created on first use and reused afterwards; sessions in the same directory join the same group, visible when you open the web profile. Registry failures degrade to an ungrouped session and never block the chat.
 - `/session` lists this directory's stored sessions (newest first) in a scrollable picker; pick one to switch (history replays). Hidden from the list: subagent child sessions, **archived** sessions (archive state is shared with the web UI), and **blank** sessions that never started a turn.
 - `/fork` branches the current session and switches onto the copy.
-- In the dsh **web** UI these sessions may appear under "ungrouped": the web groups sessions by *workspace attachment*, a web-profile concept this TUI does not compose.
+- In the dsh **web** UI these sessions appear under their directory group (the workspace registry both profiles share); before group placement landed they showed under "ungrouped".
 
 ## Keyboard reference
 
