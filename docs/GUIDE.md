@@ -8,6 +8,7 @@
 - [Commands](#commands)
 - [File references in prompts](#file-references-in-prompts)
 - [Working with todos](#working-with-todos)
+- [Context compaction](#context-compaction)
 - [Permissions & approvals](#permissions--approvals)
 - [Themes](#themes)
 - [Persisted settings](#persisted-settings)
@@ -112,6 +113,20 @@ Todos are **authored by the agent** through its `todo_write` tool — the TUI re
 3. Run `/todo` to open the current list: `☑` completed (dim), `◐` in progress (accent), `☐` pending.
 
 There is no user-side todo editing; ask the agent to add, reorder, or complete items.
+
+## Context compaction
+
+Three layers keep long tasks inside the model's context window:
+
+1. **Step-boundary auto-compaction (always on, mid-task).** Between every step of a running turn the harness measures the next request; once it reaches ≥80% of the model's context window (capped by the remaining completion budget) it replaces the oldest balanced history range with one summary message and continues the same turn. A provider `context window exceeded` error forces an immediate compaction (plus oversized-tool-result pruning) and retries the request.
+2. **Manual `/compact` while idle.** Compacts useful history below the automatic threshold right away; the notice reports `Compacted N history items (~M tokens)`.
+3. **`/compact` during a running turn.** The request is queued instead of rejected: `· /compact queued — runs when the current turn ends`. It dispatches automatically at the next true-idle boundary — interrupting with `Esc` lets it run sooner — repeat requests coalesce, and a new turn that races in defers it further.
+
+Supporting behavior:
+
+- After each turn the TUI measures the live context; crossing ~70% of the window once per band shows `· context at ~N% of the window — /compact to shrink it` (the hint re-arms after the ratio falls back, e.g. after a compaction).
+- Compaction progress is visible as `· compacting context…` / `· context compacted` notices.
+- Compaction never deletes anything: shadowed entries stay in the session log and `/export`; they simply stop being sent to the model.
 
 ## Permissions & approvals
 

@@ -37,6 +37,7 @@ import {
 } from '@earendil-works/pi-tui'
 import type {} from '@deepseek-ai/dsh-commands'
 import { createDriver, createToolPresenter, type AgentDriver, type DriverModelRoute } from './agent-driver.ts'
+import { CompactQueue, PressureLatch } from './compact-queue.ts'
 import { fuzzyFileItems, resolveFdPath } from './components/file-search.ts'
 import { TranscriptModel, type TranscriptItem } from './events.ts'
 import { TranscriptView, type ItemContext } from './components/transcript.ts'
@@ -1192,6 +1193,26 @@ export class TuiApp {
       this.finishApp?.(0)
       return true
     }
+    if (line === '/compact') {
+      // The registry's compactNow is an idle-only maintenance task; while a
+      // turn runs, queue it for the turn's end instead of failing "busy".
+      // Idle requests fall through to the registry dispatch below.
+      if (!this.driver.hasAgent) {
+        this.driver.model.pushNotice(t('notice.needFirstMessage'))
+        return true
+      }
+      if (this.driver.running) {
+        this.compactQueue.request({
+          isRunning: () => this.driver.running,
+          whenIdle: () => this.driver.agent!.whenIdle(),
+          dispatch: async () => { await this.dispatchCommand('/compact') },
+          onQueued: () => this.driver.model.pushNotice(t('notice.compactQueued')),
+          onDuplicate: () => this.driver.model.pushNotice(t('notice.compactAlreadyQueued')),
+          onError: message => this.driver.model.pushNotice(t('notice.compactQueueFailed', { message: message.slice(0, 120) }), 'error'),
+        })
+        return true
+      }
+    }
     if (line === '/clear') {
       this.transcript.invalidate()
       this.driver.model.pushNotice(t('notice.viewCleared'))
@@ -1431,6 +1452,9 @@ export class TuiApp {
         process.stdout.write(running ? '\x1b]9;4;1;0\x07' : '\x1b]9;4;0;0\x07')
         render()
         this.tui.requestRender()
+        // Turn end is the cheap moment to advise on context pressure: the
+        // measurement is O(surface) and the hint latches once per band.
+        if (!running) void this.checkContextPressure()
       }, 'status-render')
     }))
     render()
@@ -1609,9 +1633,42 @@ export class TuiApp {
     this.driver.model.pushNotice(t('notice.sendFailed', { message: message.slice(0, 120) }), 'error')
   }
 
+  /**
+   * Post-turn context-pressure hint: measure the live request against the
+   * routed model's context window and, when it crosses ~70% once per band,
+   * suggest `/compact`. Purely advisory — missing services, unrouted
+   * sessions, or measurement failures stay silent.
+   */
+  private async checkContextPressure(): Promise<void> {
+    const agent = this.driver.agent
+    if (agent === undefined) return
+    const meter = this.ctx.get('tokenMeter') as
+      { measure(session: unknown): { totalTokens: number } } | undefined
+    const llm = this.ctx.get('llm') as
+      { resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{ context?: number }> } | undefined
+    if (meter === undefined || llm === undefined) return
+    try {
+      const route = this.driver.route
+      const info = await llm.resolveModelInfo(route.provider, route.model)
+      const contextWindow = info.context
+      if (contextWindow === undefined || contextWindow <= 0) return
+      const ratio = meter.measure(agent.session).totalTokens / contextWindow
+      if (this.pressureLatch.shouldNotify(ratio)) {
+        this.driver.model.pushNotice(t('notice.contextPressure', { percent: String(Math.round(ratio * 100)) }))
+      }
+    } catch {
+      // The hint never justifies noise; auto-compaction owns the hard limit.
+    }
+  }
+
   private onShutdown: ((code: number) => void) | undefined
   /** Quit request callable shared with command dispatch (/exit, /quit). */
   private finishApp: ((code: number) => void) | undefined
+
+  /** Defers `/compact` made during a running turn to the next idle boundary. */
+  private readonly compactQueue = new CompactQueue()
+  /** One-shot-per-band latch for the post-turn context-pressure hint. */
+  private readonly pressureLatch = new PressureLatch(0.7, 0.6)
 
   private async shutdown(code: number): Promise<void> {
     this.log.debug(`shutdown: begin (code ${String(code)})`)
