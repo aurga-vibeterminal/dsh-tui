@@ -88,7 +88,7 @@ TUI-local commands (always available):
 | `/export [path]` | Export the transcript as Markdown |
 | `/events` | Raw session-event inspector |
 | `/clear` | Clear the transcript view (history intact) |
-| `/exit`, `/quit` | Quit (same as `Ctrl+Q`) |
+| `/exit` | Quit (alias `/quit`; same as `Ctrl+Q`) |
 
 Commands registered by the runtime profile (e.g. from plugins) are dispatched through the same slash pipeline, so anything dsh registers is available too.
 

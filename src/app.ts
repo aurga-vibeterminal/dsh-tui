@@ -22,6 +22,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import {
   CombinedAutocompleteProvider,
   Editor,
+  fuzzyMatch,
   isViewportTUI,
   Key,
   matchesKey,
@@ -67,18 +68,26 @@ export interface AppResult {
 }
 
 /** Assembly and lifecycle of the fullscreen session. */
+/** One palette command: a visible name plus hidden dispatch aliases. */
+export interface ComposerCommand {
+  name: string
+  description?: string
+  aliases?: readonly string[]
+}
+
 /**
  * Wraps the combined autocomplete provider so an empty/blank composer never
  * offers suggestions: deleting the leading "/" must close the command list,
  * not fall through to the base-path file listing. Forced (Tab) completion is
  * unaffected.
  */
-class ComposerAutocomplete implements AutocompleteProvider {
+export class ComposerAutocomplete implements AutocompleteProvider {
   constructor(
     private readonly inner: CombinedAutocompleteProvider,
     private readonly basePath: string,
     private readonly fdPath: string | null,
     private readonly skills: () => readonly { name: string, description: string }[],
+    private readonly commands: () => readonly ComposerCommand[],
   ) {}
 
   async getSuggestions(
@@ -113,6 +122,41 @@ class ComposerAutocomplete implements AutocompleteProvider {
         const items = fuzzyFileItems(this.basePath, atToken)
         if (items.length === 0) return null
         return { items, prefix: atToken }
+      }
+    }
+    // Slash commands match the primary name or a hidden alias (one palette
+    // entry per command); an alias hit labels the row "name (alias)" so the
+    // match is self-explanatory. Mirrors the inner provider's trigger rules:
+    // line-leading "/" with no space yet, never on forced (Tab) completion.
+    const commandText = before.trimStart()
+    if (options.force !== true && commandText.startsWith('/') && !commandText.slice(1).includes(' ')) {
+      const query = commandText.slice(1)
+      const matches: { command: ComposerCommand, score: number, viaAlias?: string }[] = []
+      for (const command of this.commands()) {
+        const nameMatch = fuzzyMatch(query, command.name)
+        if (nameMatch.matches) {
+          matches.push({ command, score: nameMatch.score })
+          continue
+        }
+        let bestAlias: { alias: string, score: number } | undefined
+        for (const alias of command.aliases ?? []) {
+          const aliasMatch = fuzzyMatch(query, alias)
+          if (aliasMatch.matches && (bestAlias === undefined || aliasMatch.score < bestAlias.score)) {
+            bestAlias = { alias, score: aliasMatch.score }
+          }
+        }
+        if (bestAlias !== undefined) matches.push({ command, score: bestAlias.score, viaAlias: bestAlias.alias })
+      }
+      // Primary-name matches outrank alias matches on score ties.
+      matches.sort((a, b) => a.score - b.score || Number(a.viaAlias !== undefined) - Number(b.viaAlias !== undefined))
+      if (matches.length === 0) return null
+      return {
+        items: matches.map(({ command, viaAlias }) => ({
+          value: command.name,
+          label: viaAlias === undefined ? command.name : `${command.name} (${viaAlias})`,
+          ...(command.description === undefined || command.description === '' ? {} : { description: command.description }),
+        })),
+        prefix: commandText,
       }
     }
     return await this.inner.getSuggestions(lines, cursorLine, cursorCol, options)
@@ -1061,27 +1105,28 @@ export class TuiApp {
 
   private refreshCommandAutocomplete(): void {
     const commands = this.ctx.get('commands')
-    const localItems = [
-      { name: 'exit', description: 'quit the TUI (alias: quit)' },
-      { name: 'quit', description: 'quit the TUI (alias: exit)' },
+    // One palette entry per command; alternate spellings ride along as hidden
+    // aliases (still dispatched, still matched when typed) instead of
+    // crowding the list as duplicate rows.
+    const paletteItems: ComposerCommand[] = [
+      { name: 'exit', description: 'quit the TUI', aliases: ['quit'] },
       { name: 'clear', description: 'clear the transcript view' },
-      { name: 'session', description: 'list stored sessions and switch (alias: resume)' },
+      { name: 'session', description: 'list stored sessions and switch to one', aliases: ['resume', 'sessions'] },
       { name: 'new', description: 'start a fresh session (old one stays in /session)' },
       { name: 'preset', description: 'show or set the agent preset mode (next session)' },
-      { name: 'resume', description: 'switch to a stored session (alias: session)' },
       { name: 'events', description: 'inspect raw session events' },
-      { name: 'model', description: 'switch provider/model/effort' },
-      { name: 'thinking', description: 'switch the reasoning level (off | low | high | max), alias: /effort' },
+      { name: 'model', description: 'switch provider/model/effort', aliases: ['models'] },
+      { name: 'thinking', description: 'switch the reasoning level (off | low | high | max)', aliases: ['effort'] },
       { name: 'mcp', description: 'list connected MCP servers and their tools' },
       { name: 'reload', description: 'apply profile composition changes (new plugin/MCP rows) without restarting' },
-      { name: 'skill', description: 'browse available skills and inspect their instructions (alias: /skills)' },
+      { name: 'skill', description: 'browse available skills and inspect their instructions', aliases: ['skills'] },
       { name: 'cwd', description: 'show or change the working directory' },
       { name: 'inbox', description: 'view and remove queued or steering input' },
       { name: 'fork', description: 'fork the current session and switch to it' },
       { name: 'expand', description: 'toggle all tool detail cards' },
-      { name: 'todo', description: 'show the current todo list' },
+      { name: 'todo', description: 'show the current todo list', aliases: ['todos'] },
       { name: 'theme', description: 'switch color theme (dark/light)' },
-      { name: 'language', description: 'switch UI language' },
+      { name: 'language', description: 'switch UI language', aliases: ['lang'] },
       { name: 'export', description: 'export the transcript as Markdown' },
       { name: 'copy', description: 'copy an assistant reply to the clipboard' },
     ]
@@ -1091,7 +1136,7 @@ export class TuiApp {
       try {
         const descriptors = commands.list(this.driver.agent!)
         for (const descriptor of descriptors) {
-          localItems.unshift({ name: descriptor.name, description: descriptor.description })
+          paletteItems.unshift({ name: descriptor.name, description: descriptor.description })
         }
       } catch (error: unknown) {
         this.log.debug(`command list failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -1101,10 +1146,11 @@ export class TuiApp {
     // / stays commands-only so Enter keeps meaning "run this command".
     const fdPath = resolveFdPath()
     this.editor.setAutocompleteProvider(new ComposerAutocomplete(
-      new CombinedAutocompleteProvider(localItems, process.cwd(), fdPath),
+      new CombinedAutocompleteProvider(paletteItems, process.cwd(), fdPath),
       process.cwd(),
       fdPath,
       () => this.userSkills,
+      () => paletteItems,
     ))
     if (!this.skillsRefreshed) {
       this.skillsRefreshed = true
