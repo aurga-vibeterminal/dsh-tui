@@ -13,7 +13,7 @@ import {
   type MarkdownTheme,
 } from '@earendil-works/pi-tui'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
-import type { Theme } from '../theme.ts'
+import { trueColorEnabled, type Theme } from '../theme.ts'
 import type { TranscriptItem } from '../events.ts'
 import { t } from '../i18n.ts'
 import { LOGO_RGB, LOGO_ROWS } from '../logo-cells.ts'
@@ -32,17 +32,13 @@ export interface ItemContext {
 /**
  * Truecolor support probe: the logo's brand blue needs direct-color ANSI;
  * terminals without it get the blocks in the theme's accent color instead.
+ * (Shared with the theme system — see `src/theme.ts`.)
  */
-function trueColorEnabled(): boolean {
-  if (process.env.COLORTERM === 'truecolor' || process.env.COLORTERM === '24bit') return true
-  const program = process.env.TERM_PROGRAM
-  if (program === 'iTerm.app' || program === 'vscode' || program === 'Apple_Terminal') return true
-  return process.env.WT_SESSION !== undefined || process.env.TERMINAL_EMULATOR === 'JetBrains-JediTerm'
-}
+const TRUECOLOR = trueColorEnabled()
 
 /** One logo row: block runs in brand blue (or accent), spaces untouched. */
 function logoLine(row: string, theme: Theme): string {
-  const truecolor = trueColorEnabled()
+  const truecolor = TRUECOLOR
   const [r, g, b] = LOGO_RGB
   let out = ''
   let run = ''
@@ -170,7 +166,7 @@ function createItemComponent(item: TranscriptItem, context: ItemContext): Compon
       const chips = item.images === undefined ? [] : item.images.map(
         image => theme.dim(`  🖼 ${image.name} · ${String(image.width)}×${String(image.height)}`),
       )
-      const body = new Text(theme.user('❯ ') + item.text, 0, 0)
+      const body = new Text(theme.user('❯ ') + theme.text(item.text), 0, 0)
       const component = chips.length === 0
         ? body
         : new Compound([body, new Text(chips.join('\n'), 0, 0)])
@@ -183,10 +179,10 @@ function createItemComponent(item: TranscriptItem, context: ItemContext): Compon
       if (item.text === '') {
         return new Text(reasoning.length > 0 ? reasoning.join('\n') : (item.live ? theme.dim(t('transcript.pending')) : ''), 0, 0)
       }
-      if (reasoning.length === 0) return new Markdown(item.text, 0, 0, markdownTheme)
+      if (reasoning.length === 0) return new Markdown(item.text, 0, 0, markdownTheme, { color: theme.text })
       return new Compound([
         new Text(reasoning.join('\n'), 0, 0),
-        new Markdown(item.text, 0, 0, markdownTheme),
+        new Markdown(item.text, 0, 0, markdownTheme, { color: theme.text }),
       ])
     }
     case 'tool': {

@@ -123,7 +123,7 @@ There is no user-side todo editing; ask the agent to add, reorder, or complete i
 
 ## Themes
 
-`/theme` opens the picker; `/theme light` switches directly. The change re-skins every surface live (transcript, editor border, header, dialogs).
+`/theme` opens the picker; `/theme light` switches directly. Pick the theme that matches your terminal's background — `dark` renders light text for dark backgrounds, `light` renders dark text for light backgrounds — and the change re-skins every surface live (body text, transcript, editor border and autocomplete palette, header, dialogs). Colors render as truecolor on terminals that support it and fall back to ANSI 16-color codes elsewhere.
 
 ## Persisted settings
 

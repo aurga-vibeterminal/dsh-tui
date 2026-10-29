@@ -45,7 +45,7 @@ import { LineText } from './components/line-text.ts'
 import { ApprovalDialog, EventsDialog, ListDialog, PickerDialog, QuestionDialog } from './dialogs.ts'
 import { StatusLine } from './components/status-line.ts'
 import type {} from '@deepseek-ai/dsh-permission-presets'
-import { THEME_NAMES, markdownThemeFor, selectListThemeFor, themeByName, type Theme } from './theme.ts'
+import { THEME_NAMES, liveSelectListTheme, markdownThemeFor, themeByName, type Theme } from './theme.ts'
 import { writeFile } from 'node:fs/promises'
 import { availableLocales, initSystemLocale, knownLocales, locale, permissionDisplayName, setLocale, t } from './i18n.ts'
 import { loadTuiSettings, saveTuiSettings, type TuiSettings } from './settings.ts'
@@ -274,8 +274,10 @@ export class TuiApp {
     const transcript = new TranscriptView(model.items, itemContext)
     const hints = new LineText('', 1)
     const editor = new Editor(tui, {
-      borderColor: theme.border,
-      selectList: selectListThemeFor(theme),
+      // Live theme reads: the editor is constructed once, so its border and
+      // autocomplete palette must re-skin when the theme ref is swapped.
+      borderColor: (text: string) => themeRef.current.border(text),
+      selectList: liveSelectListTheme(() => themeRef.current),
     })
     const composer = new VStack([editor, hints])
 
@@ -401,7 +403,10 @@ export class TuiApp {
     this.themeRef.current = next
     this.itemContext = { theme: next, markdownTheme: markdownThemeFor(next) }
     this.transcript.setContext(this.itemContext)
-    this.editor.borderColor = next.border
+    // Header and hints cache pre-rendered strings; re-set them so they
+    // re-skin immediately instead of waiting for the next model event.
+    this.header.set(headerLine(this.driver.model, next), this.driver.running)
+    this.hints.setText(hintsLine(this.driver, next))
     this.persistSetting('theme', name)
     this.driver.model.pushNotice(t('notice.themeChanged', { name }))
     this.tui.requestRender()
