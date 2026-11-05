@@ -21,11 +21,36 @@
 
 ## Install (into a `tui` profile)
 
-The package is **not yet published** — install from a local path or a git URL:
+The package is **not yet published** — one-time setup from a fresh machine:
+
+**1. Install dsh** (the DeepSeek Harness CLI):
+
+```sh
+npm install -g @deepseek-ai/dsh
+```
+
+**2. Install pnpm** (the repo's package manager):
+
+```sh
+npm install -g pnpm
+```
+
+**3. Build the local checkout:**
+
+```sh
+cd D:\path\to\dsh-tui
+pnpm install
+pnpm build         # tsdown → lib/
+```
+
+`lib/` must exist before step 4: the profile links against this checkout, and a missing build surfaces as `failed to import … lib/index.js` when the profile activates.
+
+**4. Install the bundle into the profile:**
 
 ```sh
 dsh plugin --profile tui add D:\path\to\dsh-tui     # local path (dev)
-dsh plugin --profile tui add github:aurga-vibeterminal/dsh-tui   # git source (builds itself via `prepare`)
+# or, without a local checkout:
+dsh plugin --profile tui add github:aurga-vibeterminal/dsh-tui   # git source: pnpm clones and builds it via `prepare` (see note)
 ```
 
 Then launch:
@@ -39,6 +64,8 @@ dsh tui --model deepseek-account/deepseek-flash   # explicit model route
 ```
 
 Once published as `@vterminal/dsh-tui`, the shorthand `dsh plugin --profile tui add @vterminal/dsh-tui` will work.
+
+> **Git-source note.** `github:…` runs `pnpm add` inside the profile: pnpm clones the repository, runs the bundle's `prepare` script (`tsdown` → `lib/`), and links the built snapshot — no manual checkout or build needed. pnpm ≥ 10.26 gates dependency build scripts behind `allowBuilds`, so the first install may report the build as pending; approve it (`pnpm approve-builds` in the profile, or dsh's guided approval) and re-run the `add`. The install is pinned to the cloned commit — update by re-running the `add`.
 
 The first `add` initializes the profile over `dsh-base`; the bundle contributes a `tui-startup` provider (flag parsing) and a `tui-runner` (the terminal app). HMR stays enabled with the base default `root: []` — configuration watches only, no module watching: profile patch changes (e.g. newly added MCP rows) apply live and `/reload` forces a reconcile, while module-code changes — including the dev-linked bundle's own rebuilds — are never hot-swapped under the fullscreen app and report a restart.
 
