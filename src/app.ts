@@ -1475,6 +1475,24 @@ export class TuiApp {
         if (turnEnded) void this.checkContextPressure()
       }, 'status-render')
     }))
+    // Children the tools spawn share this console — pipes redirect only their
+    // stdio, so a GUI app or a native crash handler can still write straight
+    // to the screen at the cursor (right on the composer), and no in-process
+    // capture can stop it. Ctrl+L erases it by hand; this heals the screen
+    // automatically whenever external activity settles.
+    let healTimer: ReturnType<typeof setTimeout> | undefined
+    this.disposers.push(() => { if (healTimer !== undefined) clearTimeout(healTimer) })
+    this.disposers.push(this.ctx.on('session/event', (session, event) => {
+      if (session !== this.driver.session) return
+      if (!shouldHealAfterEvent(String(event.type))) return
+      // Next macrotask (debounced): let the transcript apply the event and
+      // render differentially first, then the full repaint supersedes it.
+      if (healTimer !== undefined) clearTimeout(healTimer)
+      healTimer = setTimeout(() => {
+        healTimer = undefined
+        guard(() => { this.tui.renderNow(true) }, 'heal-repaint')
+      }, 0)
+    }))
     render()
   }
 
@@ -1802,6 +1820,16 @@ function firstLineOf(text: string): string {
 
 export function terminalProgressActive(status: Pick<DriverStatus, 'busy' | 'blocked'>): boolean {
   return status.busy && status.blocked === undefined
+}
+
+/**
+ * Session events whose settlement marks a window where external processes ran
+ * (the tool's children, background jobs) and may have written straight to the
+ * shared console — each one schedules a full-screen repaint that erases the
+ * stray text the way Ctrl+L does, but automatically.
+ */
+export function shouldHealAfterEvent(eventType: string): boolean {
+  return eventType === 'tool/result' || eventType === 'turn/end' || eventType === 'job/settled'
 }
 
 /** Program name reported in OSC 7501; the spec caps it at 32 `[A-Za-z0-9_.+-]` chars. */

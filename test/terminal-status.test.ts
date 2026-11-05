@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { aggregateStatus, type DriverStatus } from '../src/agent-driver.ts'
-import { terminalProgressActive, TuiApp } from '../src/app.ts'
+import { shouldHealAfterEvent, terminalProgressActive, TuiApp } from '../src/app.ts'
 
 const running = { running: true, maintenance: false, attempts: 0, subagents: 0 }
 
@@ -48,5 +48,23 @@ describe('terminal progress', () => {
     reporter.reportTerminalStatus.call(app, status(undefined))
 
     expect(progress).toEqual([true, false, true])
+  })
+})
+
+describe('stray-output healing events', () => {
+  it('heals exactly when external processes stop writing', () => {
+    // A tool's children (and the whole turn) are the windows where a shared
+    // console can receive native writes; background jobs settle later.
+    expect(shouldHealAfterEvent('tool/result')).toBe(true)
+    expect(shouldHealAfterEvent('turn/end')).toBe(true)
+    expect(shouldHealAfterEvent('job/settled')).toBe(true)
+
+    // Streaming and bookkeeping events fire constantly — repainting on them
+    // would be pure noise (and flicker) with no external writer involved.
+    expect(shouldHealAfterEvent('user/message')).toBe(false)
+    expect(shouldHealAfterEvent('assistant/message')).toBe(false)
+    expect(shouldHealAfterEvent('assistant/attempt')).toBe(false)
+    expect(shouldHealAfterEvent('tool/call')).toBe(false)
+    expect(shouldHealAfterEvent('session/title')).toBe(false)
   })
 })

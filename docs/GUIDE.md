@@ -185,7 +185,7 @@ To diagnose a "it looked idle but was working" report, run with `DSH_TUI_LOG=<fi
 
 | Symptom | Fix |
 |---|---|
-| Stray log text on screen (browsers, GUI apps write to the console) | `Ctrl+L` full repaint |
+| Stray log text on screen (browsers, GUI apps write to the console) | Auto-healed: the screen fully repaints whenever a tool result, turn end, or background job settles; `Ctrl+L` forces one immediately |
 | `no API key for provider route "deepseek-official"` | Use the account route (`/model`, pick `deepseek-account/...`) or store an API key (`DEEPSEEK_API_KEY`, or the web UI's Models page) |
 | `@` file search shows nothing | Put a space before `@`; if files still miss, install `fd` |
 | Mouse wheel behaves like ↑/↓ (input history) | Your terminal does not implement SGR mouse reporting (DEC modes 1000/1002/1006); it falls back to sending arrow keys. Use `PgUp`/`PgDn` or a terminal with mouse support |
