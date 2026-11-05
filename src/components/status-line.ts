@@ -1,7 +1,9 @@
 /**
  * The animated status segment of the header bar: shows a braille spinner
- * frame while the agent runs, plain text otherwise. Owns its frame timer and
- * asks the host for re-renders on each tick.
+ * frame while work is in flight (a turn, maintenance, or a background subagent
+ * — the driver's aggregate busy state), plain text otherwise. Owns its frame
+ * timer, asks the host for re-renders on each tick, and reports the
+ * visible/hidden flips so a terminal integration can mirror them.
  * @module dsh-tui/components/status-line
  */
 
@@ -16,12 +18,24 @@ export class StatusLine implements Component {
   private timer: ReturnType<typeof setInterval> | undefined
   private cacheWidth: number | undefined
   private cacheLine: string[] | undefined
+  private activeListener: ((active: boolean) => void) | undefined
 
   constructor(
     private readonly requestRender: () => void,
     private readonly intervalMs = 120,
     private readonly frames: readonly string[] = SPINNER_FRAMES,
   ) {}
+
+  /**
+   * Observe the spinner's visible/hidden flips — the exact state a terminal-side
+   * observer can see (tab indicator, notification, sound), so an addon can
+   * mirror it instead of scraping the byte stream for frames. Pass `undefined`
+   * to detach. The flag mirrors the driver's aggregate busy state, so a visible
+   * spinner never disagrees with what the OSC reports.
+   */
+  setOnActiveChange(listener: ((active: boolean) => void) | undefined): void {
+    this.activeListener = listener
+  }
 
   /** Update the static text and the running state together. */
   set(text: string, active: boolean): void {
@@ -33,14 +47,19 @@ export class StatusLine implements Component {
     this.cacheWidth = undefined
     this.cacheLine = undefined
     this.syncTimer()
-    if (stateChanged) this.requestRender()
+    if (stateChanged) {
+      this.requestRender()
+      this.activeListener?.(this.active)
+    }
   }
 
   dispose(): void {
+    const wasActive = this.active
     this.active = false
     this.syncTimer()
     this.cacheWidth = undefined
     this.cacheLine = undefined
+    if (wasActive) this.activeListener?.(false)
   }
 
   invalidate(): void {

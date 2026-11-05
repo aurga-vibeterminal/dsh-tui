@@ -9,6 +9,7 @@
 - [File references in prompts](#file-references-in-prompts)
 - [Working with todos](#working-with-todos)
 - [Context compaction](#context-compaction)
+- [Busy, idle & terminal status](#busy-idle--terminal-status)
 - [Permissions & approvals](#permissions--approvals)
 - [Themes](#themes)
 - [Persisted settings](#persisted-settings)
@@ -127,6 +128,27 @@ Supporting behavior:
 - After each turn the TUI measures the live context; crossing ~70% of the window once per band shows `· context at ~N% of the window — /compact to shrink it` (the hint re-arms after the ratio falls back, e.g. after a compaction).
 - Compaction progress is visible as `· compacting context…` / `· context compacted` notices.
 - Compaction never deletes anything: shadowed entries stay in the session log and `/export`; they simply stop being sent to the model.
+
+## Busy, idle & terminal status
+
+The header spinner follows a single aggregate state, because the agent's own `idle` ⇄ `running` flag under-reports work. Terminal indicators additionally distinguish active work from waiting for user input:
+
+| Busy source | Why the turn flag misses it |
+|---|---|
+| a running turn | the obvious case |
+| maintenance work (`/compact`, auto-compaction) | runs from the idle phase, so the agent's public status stays `idle` while a request is in flight |
+| an in-flight LLM request | the same case seen from the stream side |
+| background subagents | the delegation tool returns immediately, so the parent settles to `idle` while its children keep working |
+| a permission / question dialog | reported as *waiting for you*, not as *working* |
+
+Two escape sequences carry it out:
+
+- **`OSC 9;4`** — tab / taskbar progress. pi-tui re-emits the active form every second while work is in flight and no dialog is waiting for input, so a dropped edge or an observer that attached mid-run still converges; the clear form is written when a dialog blocks the turn or the work settles, and again on exit.
+- **`OSC 7501`** (Program Status) — `working`, `blocked` (`kind=permission|question`), or `idle`, with the session title as the message. Terminals receive it only after answering the protocol's support query: `PI_PROGRAM_STATUS=1` forces reports, `PI_PROGRAM_STATUS=0` disables them; tmux and screen do not forward the query. Prompts and model output are never reported.
+
+When a subagent is running but the parent turn has settled, the spinner keeps spinning and the hint line reads `enter send · background agents still running` — Enter then starts a new turn instead of queueing.
+
+To diagnose a "it looked idle but was working" report, run with `DSH_TUI_LOG=<file>`: every transition is logged with its sources — `status: busy=true running=true maintenance=false attempts=1 subagents=0 blocked=- -> working` — together with the spinner's `visible` / `hidden` flips.
 
 ## Permissions & approvals
 

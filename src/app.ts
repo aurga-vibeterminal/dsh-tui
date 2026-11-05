@@ -34,9 +34,10 @@ import {
   type AutocompleteProvider,
   type AutocompleteSuggestions,
   type Component,
+  type ProgramStatus,
 } from '@earendil-works/pi-tui'
 import type {} from '@deepseek-ai/dsh-commands'
-import { createDriver, createToolPresenter, type AgentDriver, type DriverModelRoute } from './agent-driver.ts'
+import { createDriver, createToolPresenter, type AgentDriver, type BlockedKind, type DriverModelRoute, type DriverStatus } from './agent-driver.ts'
 import { CompactQueue, PressureLatch } from './compact-queue.ts'
 import { fuzzyFileItems, resolveFdPath } from './components/file-search.ts'
 import { TranscriptModel, type TranscriptItem } from './events.ts'
@@ -406,7 +407,7 @@ export class TuiApp {
     this.transcript.setContext(this.itemContext)
     // Header and hints cache pre-rendered strings; re-set them so they
     // re-skin immediately instead of waiting for the next model event.
-    this.header.set(headerLine(this.driver.model, next), this.driver.running)
+    this.header.set(headerLine(this.driver.model, next), this.driver.busy)
     this.hints.setText(hintsLine(this.driver, next))
     this.persistSetting('theme', name)
     this.driver.model.pushNotice(t('notice.themeChanged', { name }))
@@ -1360,7 +1361,7 @@ export class TuiApp {
   private wireInteractions(ctx: Context): void {
     this.disposers.push(ctx.on('approval/request', (request, next) => this.guardWaterfall('approval', async () => {
       const dialog = new ApprovalDialog(request, this.theme)
-      const outcome = await this.showDialog(dialog)
+      const outcome = await this.showDialog(dialog, 'permission')
       this.driver.model.pushNotice(
         outcome === 'allowed-once'
           ? `· approved ${request.toolName}`
@@ -1373,7 +1374,7 @@ export class TuiApp {
 
     this.disposers.push(ctx.on('user-questions/request', (request, next) => this.guardWaterfall('questions', async () => {
       const dialog = new QuestionDialog({ questions: request.questions, signal: request.signal }, this.theme)
-      const answer = await this.showDialog(dialog)
+      const answer = await this.showDialog(dialog, 'question')
       this.driver.model.pushNotice(
         answer.answers.length === 0
           ? '· questions cancelled'
@@ -1395,14 +1396,19 @@ export class TuiApp {
     }
   }
 
-  private showDialog<T>(dialog: Component & { readonly done: Promise<T> }): Promise<T> {
+  private showDialog<T>(
+    dialog: Component & { readonly done: Promise<T> },
+    block: BlockedKind | undefined = undefined,
+  ): Promise<T> {
     const run = async (): Promise<T> => {
       const handle = this.tui.showOverlay(dialog, { width: '100%', anchor: 'bottom-left', margin: 0 })
-      this.tui.requestRender()
+      if (block !== undefined) this.driver.setBlocked(block)
       try {
+        this.tui.requestRender()
         return await dialog.done
       } finally {
         handle.hide()
+        if (block !== undefined) this.driver.setBlocked(undefined)
         // Full repaint: console-direct writes from stray children may have
         // damaged rows the differential renderer would leave untouched.
         this.tui.renderNow(true)
@@ -1413,11 +1419,19 @@ export class TuiApp {
     return queued
   }
 
+  /** Last state written on each channel; identical reports never reach the wire. */
+  private lastProgressActive: boolean | undefined
+  private lastProgramStatus = ''
+
   private wire(model: TranscriptModel): void {
     const render = (): void => {
-      this.header.set(headerLine(model, this.theme), this.driver.running)
+      this.header.set(headerLine(model, this.theme), this.driver.busy)
       this.hints.setText(hintsLine(this.driver, this.theme))
     }
+    // The spinner's visible/hidden flips are exactly what a terminal-side
+    // observer can see; log them so a "status said idle while it worked" report
+    // is checkable against the aggregate transitions.
+    this.header.setOnActiveChange(active => { this.log.debug(`spinner: ${active ? 'visible' : 'hidden'}`) })
     // Exceptions inside event listeners and render callbacks would take down
     // the whole process (uncaught in a timer/stdin context); degrade to a
     // visible notice and a log line instead.
@@ -1440,24 +1454,73 @@ export class TuiApp {
         // without this invalidate the viewport never shows new items.
         this.transcript.invalidate()
         render()
+        // The reported message is the session title, so a rename refreshes it
+        // (the dedup inside keeps every other model event off the wire).
+        this.reportTerminalStatus(this.driver.status)
         this.tui.requestRender()
       }, 'render')
     }))
-    // Running/idle flips are NOT model events: without this hook the header
-    // spinner keeps animating (and emitting output) after the turn ended.
-    this.disposers.push(this.driver.onStatus((running) => {
+    // Aggregate state flips are NOT model events: without this hook the header
+    // spinner keeps animating (and emitting output) after the work ended.
+    let lastRunning = false
+    this.disposers.push(this.driver.onStatus((status) => {
+      // Context pressure is measured at turn end only, not at every aggregate
+      // flip: the measurement is O(surface) and the hint latches once per band.
+      const turnEnded = lastRunning && !status.running
+      lastRunning = status.running
       guard(() => {
-        // ConEmu-style progress state so terminals (and vterm's addons) can
-        // report busy/idle: state 1 = indeterminate, 0 = clear.
-        process.stdout.write(running ? '\x1b]9;4;1;0\x07' : '\x1b]9;4;0;0\x07')
+        this.reportTerminalStatus(status)
         render()
         this.tui.requestRender()
-        // Turn end is the cheap moment to advise on context pressure: the
-        // measurement is O(surface) and the hint latches once per band.
-        if (!running) void this.checkContextPressure()
+        if (turnEnded) void this.checkContextPressure()
       }, 'status-render')
     }))
     render()
+  }
+
+  /**
+   * Push the aggregate state to the terminal. OSC 9;4 drives the tab/taskbar
+   * indicator and pi-tui re-emits it every second while active, so a dropped
+   * edge or a late-attaching observer still converges; OSC 7501 program status
+   * adds the states a busy/idle bit cannot express — `blocked` (the turn waits
+   * on the user) versus `working`. Terminals that never answer the 7501 support
+   * query silently drop those reports.
+   *
+   * Each channel dedups its own payload: the aggregate also flips on count
+   * changes (a second subagent joining) that leave the reported state identical,
+   * and a redundant escape is pure noise on a shared byte stream.
+   */
+  private reportTerminalStatus(status: DriverStatus): void {
+    const terminal = this.tui.terminal
+    const progress = terminalProgressActive(status)
+    const payload: ProgramStatus = !status.busy
+      ? { state: 'idle', app: PROGRAM_STATUS_APP }
+      : {
+        ...(status.blocked === undefined
+          ? { state: 'working' as const }
+          : { state: 'blocked' as const, kind: status.blocked }),
+        app: PROGRAM_STATUS_APP,
+        message: sessionTitle(this.driver.model),
+      }
+    const key = JSON.stringify(payload)
+    const writeProgress = progress !== this.lastProgressActive
+    const writeStatus = key !== this.lastProgramStatus
+    if (!writeProgress && !writeStatus) return
+    if (writeProgress) {
+      this.lastProgressActive = progress
+      terminal.setProgress(progress)
+    }
+    if (writeStatus) {
+      this.lastProgramStatus = key
+      terminal.setProgramStatus(payload)
+    }
+    // One line per real report: the log (DSH_TUI_LOG) is where an "it looked idle
+    // but was working" report gets checked, so it names the sources behind the bit.
+    this.log.debug(
+      `status: busy=${String(status.busy)} running=${String(status.running)}`
+      + ` maintenance=${String(status.maintenance)} attempts=${String(status.attempts)}`
+      + ` subagents=${String(status.subagents)} blocked=${status.blocked ?? '-'} -> ${payload.state}`,
+    )
   }
 
   /** Run until the user quits; resolves with the exit code. */
@@ -1721,8 +1784,11 @@ export class TuiApp {
       ])
     })
     await step('clear-progress', () => {
-      // Clear the ConEmu progress state on exit so the tab never stays "busy".
-      process.stdout.write('\x1b]9;4;0;0\x07')
+      // Clear the progress and program-status state on exit so the tab never
+      // stays "busy"; pi-tui's stop() only writes the clear when a keepalive
+      // was actually running, so the explicit pair below is the belt.
+      this.tui.terminal.setProgramStatus({ state: 'clear' })
+      this.tui.terminal.setProgress(false)
     })
     this.log.debug('shutdown: complete')
     this.onShutdown?.(code)
@@ -1734,9 +1800,21 @@ function firstLineOf(text: string): string {
   return line.length > 48 ? `${line.slice(0, 47)}…` : line
 }
 
+export function terminalProgressActive(status: Pick<DriverStatus, 'busy' | 'blocked'>): boolean {
+  return status.busy && status.blocked === undefined
+}
+
+/** Program name reported in OSC 7501; the spec caps it at 32 `[A-Za-z0-9_.+-]` chars. */
+const PROGRAM_STATUS_APP = 'dsh-tui'
+
+/** Session title, shared by the header and the OSC 7501 message (never prompts or output). */
+function sessionTitle(model: TranscriptModel): string {
+  return model.title === undefined ? t('header.newSession') : truncate(model.title, 24)
+}
+
 function headerLine(model: TranscriptModel, theme: Theme): string {
   const project = basename(process.cwd())
-  const title = model.title === undefined ? t('header.newSession') : truncate(model.title, 24)
+  const title = sessionTitle(model)
   const preset = model.preset === undefined ? '' : ` · ${permissionDisplayName(model.preset)}`
   const modelRoute = truncate(model.model ?? '', 28)
   const modelSegment = modelRoute === '' ? '' : ` · ${modelRoute}`
@@ -1745,7 +1823,11 @@ function headerLine(model: TranscriptModel, theme: Theme): string {
 }
 
 function hintsLine(driver: AgentDriver, theme: Theme): string {
-  return theme.dim(driver.running ? t('hint.running') : t('hint.idle'))
+  if (driver.running) return theme.dim(t('hint.running'))
+  // A settled parent with live children: the spinner says work continues, and
+  // the hint must not promise Enter queues into a running turn.
+  if (driver.busy) return theme.dim(t('hint.background'))
+  return theme.dim(t('hint.idle'))
 }
 
 /** Human-readable effort label: the catalog display name, else the capitalized id. */

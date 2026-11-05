@@ -35,6 +35,59 @@ export interface DriverModelRoute {
   model: string
 }
 
+/**
+ * What a dialog is waiting on the user for, mirroring the OSC 7501 program
+ * status `blocked` kinds so the terminal can tell "working" from "waiting".
+ */
+export type BlockedKind = 'permission' | 'question'
+
+/**
+ * The state a terminal observer needs, aggregated from every busy source the
+ * agent's own `agent/status` cannot see:
+ *
+ * - `running` — the driven agent's turn-level status (`idle` ⇄ `running`).
+ * - `busy` — a turn, a maintenance task (compaction, whose public status stays
+ *   `idle`), an in-flight LLM request, or a live background subagent.
+ * - `blocked` — a dialog is waiting on the user inside that work.
+ *
+ * The delegation tool returns immediately, so a parent settles to `idle` while
+ * its children keep running; `running` alone under-reports work.
+ */
+export interface DriverStatus {
+  readonly running: boolean
+  readonly busy: boolean
+  readonly blocked: BlockedKind | undefined
+  /** Whether a maintenance task (compaction) holds the agent out of the idle phase. */
+  readonly maintenance: boolean
+  /** LLM attempts currently streaming. */
+  readonly attempts: number
+  /** Live background subagent activations. */
+  readonly subagents: number
+}
+
+/**
+ * Combine the busy sources into the aggregate. Pure and exported so the
+ * surprising cases (settled parent with live children, maintenance compaction,
+ * an in-flight request) are testable without a cordis context. The individual
+ * counts travel along: a client that is told `busy` can ask *why*.
+ */
+export function aggregateStatus(flags: {
+  running: boolean
+  maintenance: boolean
+  attempts: number
+  subagents: number
+  blocked: BlockedKind | undefined
+}): DriverStatus {
+  return {
+    running: flags.running,
+    busy: flags.running || flags.maintenance || flags.attempts > 0 || flags.subagents > 0,
+    blocked: flags.blocked,
+    maintenance: flags.maintenance,
+    attempts: flags.attempts,
+    subagents: flags.subagents,
+  }
+}
+
 /** A model selection applied to the next step. */
 export interface ModelSwitch {
   provider: string
@@ -63,6 +116,10 @@ export interface AgentDriver {
   readonly model: TranscriptModel
   /** Current live status of the whole agent. */
   readonly running: boolean
+  /** Whether any work is in flight: turn, maintenance, LLM request, or subagent. */
+  readonly busy: boolean
+  /** Aggregated terminal-visible state; see {@link DriverStatus}. */
+  readonly status: DriverStatus
   /** Current selection route, live. */
   get route(): { provider: string, model: string, effort: string | undefined }
   /** Submit one user turn (creates the session on first use; queues while running). */
@@ -85,8 +142,10 @@ export interface AgentDriver {
   forkCurrent(): Promise<string>
   /** Interrupt the running turn, keeping queued input. */
   cancel(): void
-  /** Observe running/idle flips (fires on every change; returns its disposer). */
-  onStatus(listener: (running: boolean) => void): () => void
+  /** Report that a dialog is (or is no longer) waiting on the user. */
+  setBlocked(kind: BlockedKind | undefined): void
+  /** Observe status snapshots (fires on every change; returns its disposer). */
+  onStatus(listener: (status: DriverStatus) => void): () => void
   /** Stop feeding the model; resolves after subscriptions are dropped. */
   stop(): void
   /** Stop feeding and retire the agent entirely (session switch). */
@@ -153,13 +212,74 @@ export async function createDriver(
   const fs = ctx.get('fs')
   const cwd = fs === undefined ? process.cwd() : fs.processPath(await fs.resolve('.'))
   let driverPreset = options.preset
-  const statusListeners: Array<(running: boolean) => void> = []
+  const statusListeners: Array<(status: DriverStatus) => void> = []
 
   let selectionRef: ModelSelectionRef | undefined
   let handle: { agent: Agent, dispose(): Promise<void> } | undefined
   let agent: Agent | undefined
   let running = false
+  /** Compaction and other maintenance work: runs while public status is `idle`. */
+  let maintenance = false
+  /** Open LLM attempt ids — the only in-flight request signal outside the driver. */
+  const openAttempts = new Set<string>()
+  /** Live subagent activations, keyed by the `subagent/start`/`end` run id. */
+  const liveSubagents = new Set<string>()
+  let blocked: BlockedKind | undefined
+  let lastStatus: DriverStatus = aggregateStatus({
+    running: false,
+    maintenance: false,
+    attempts: 0,
+    subagents: 0,
+    blocked: undefined,
+  })
+  let reaping = false
   let firstSeqAtWire = 0
+
+  /** Recompute the aggregate and notify listeners on any change, including a
+   *  count change that leaves `busy` set (a second subagent joining): the
+   *  snapshot is public, so it must never go stale. Wire-level dedup belongs to
+   *  the reporter, which would otherwise re-emit an identical escape. */
+  const publishStatus = (): void => {
+    const next = aggregateStatus({
+      running,
+      maintenance,
+      attempts: openAttempts.size,
+      subagents: liveSubagents.size,
+      blocked,
+    })
+    if (
+      next.running === lastStatus.running
+      && next.busy === lastStatus.busy
+      && next.blocked === lastStatus.blocked
+      && next.maintenance === lastStatus.maintenance
+      && next.attempts === lastStatus.attempts
+      && next.subagents === lastStatus.subagents
+    ) return
+    lastStatus = next
+    for (const callback of [...statusListeners]) callback(next)
+  }
+
+  /**
+   * Reap the optimistic flags once the agent reaches true quiescence.
+   * `whenIdle()` waits for the driver *and* maintenance tasks, so it is the
+   * authoritative settle boundary; a missed `compaction/end` or stream `end`
+   * frame then self-corrects instead of leaving the spinner spinning. Live
+   * subagents keep their own accounting — they outlive a settled parent.
+   */
+  const reapWhenSettled = (wired: Agent): void => {
+    if (reaping) return
+    reaping = true
+    void wired.whenIdle().then(() => {
+      reaping = false
+      if (agent !== wired) return
+      maintenance = false
+      openAttempts.clear()
+      publishStatus()
+    }, () => {
+      // A failed settle observation is corrected by the next status flip.
+      reaping = false
+    })
+  }
 
   const stoppers: Array<() => void> = []
   const wireAgent = (wired: Agent): void => {
@@ -179,7 +299,10 @@ export async function createDriver(
       ctx.on('agent/status', ({ agent: subject, status }) => {
         if (subject === wired) {
           running = status === 'running'
-          for (const callback of statusListeners) callback(running)
+          // Attempts opened before a driver hand-off belong to the retired one.
+          openAttempts.clear()
+          publishStatus()
+          if (running) reapWhenSettled(wired)
         }
       }),
       ctx.on('agent/error', ({ agent: subject, error }) => {
@@ -188,10 +311,43 @@ export async function createDriver(
           model.pushNotice(t('notice.agentError', { message: message.slice(0, 180) }), 'error')
         }
       }),      ctx.on('session/event', (session, event) => {
-        if (session === wired.session) safeApply('event', () => model.applyEvent(event))
+        if (session !== wired.session) return
+        // The compaction bracket is emitted by a plugin-contributed event type,
+        // so it is narrowed structurally (same rule as TranscriptModel).
+        const type: string = event.type
+        if (type === 'compaction/start') {
+          maintenance = true
+          reapWhenSettled(wired)
+          publishStatus()
+        } else if (type === 'compaction/end') {
+          maintenance = false
+          publishStatus()
+        }
+        safeApply('event', () => model.applyEvent(event))
       }),
       ctx.on('agent/assistant-stream', ({ agent: subject, frame }) => {
-        if (subject === wired) safeApply('stream', () => model.applyFrame(frame as AssistantStreamFrameLike))
+        if (subject !== wired) return
+        if (frame.type === 'start') {
+          openAttempts.add(String(frame.attemptId))
+          reapWhenSettled(wired)
+          publishStatus()
+        } else if (frame.type === 'end') {
+          openAttempts.delete(String(frame.attemptId))
+          publishStatus()
+        }
+        safeApply('stream', () => model.applyFrame(frame as AssistantStreamFrameLike))
+      }),
+      // Subagent activations are background work: `subagent/start`/`subagent/end`
+      // pair by run id, and their payload carries no parent, so registration
+      // must happen on the agent's own scoped context — scope filtering keys the
+      // dispatch by the delegating parent and would leak siblings on the root ctx.
+      wired.ctx.on('subagent/start', (info) => {
+        liveSubagents.add(String(info.runId))
+        publishStatus()
+      }),
+      wired.ctx.on('subagent/end', (info) => {
+        liveSubagents.delete(String(info.runId))
+        publishStatus()
       }),
     )
   }
@@ -295,6 +451,12 @@ export async function createDriver(
     get running(): boolean {
       return running
     },
+    get busy(): boolean {
+      return lastStatus.busy
+    },
+    get status(): DriverStatus {
+      return lastStatus
+    },
     get route(): { provider: string, model: string, effort: string | undefined } {
       const current = selectionRef?.current
       const active = current === undefined ? selection : current
@@ -375,11 +537,16 @@ export async function createDriver(
     cancel(): void {
       agent?.cancel({ kind: 'user' }, { keepInbox: true })
     },
-    /** Observe running/idle flips (fires on every change; returns its disposer). */
-    onStatus(listener: (running: boolean) => void): () => void {
+    setBlocked(kind: BlockedKind | undefined): void {
+      if (blocked === kind) return
+      blocked = kind
+      publishStatus()
+    },
+    /** Observe status snapshots (fires on every change; returns its disposer). */
+    onStatus(listener: (status: DriverStatus) => void): () => void {
       statusListeners.push(listener)
       // Late subscribers get the current state immediately.
-      listener(running)
+      listener(lastStatus)
       return () => {
         const index = statusListeners.indexOf(listener)
         if (index >= 0) statusListeners.splice(index, 1)
@@ -393,6 +560,14 @@ export async function createDriver(
       if (handle !== undefined) await handle.dispose()
       agent = undefined
       handle = undefined
+      // A retired agent reports no work: its flags must not leak to the next one.
+      running = false
+      maintenance = false
+      blocked = undefined
+      reaping = false
+      openAttempts.clear()
+      liveSubagents.clear()
+      publishStatus()
     },
     async flush(): Promise<void> {
       if (agent === undefined) return

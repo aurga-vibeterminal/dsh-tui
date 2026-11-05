@@ -32,6 +32,7 @@ const en = {
   // hints
   'hint.idle': 'enter send · alt+s steer · / commands · ctrl+q quit',
   'hint.running': 'enter queue · alt+s steer · esc interrupt · ctrl+q quit',
+  'hint.background': 'enter send · background agents still running · ctrl+q quits them too',
   // transcript chrome
   'transcript.thinking': 'thinking… ',
   'transcript.pending': '…',
@@ -196,6 +197,7 @@ const tables: Record<Locale, Record<string, string>> = {
     'header.tokens': ' tokens',
     'hint.idle': 'enter 发送 · alt+s 转向 · / 命令 · ctrl+q 退出',
     'hint.running': 'enter 排队 · alt+s 转向 · esc 中断 · ctrl+q 退出',
+    'hint.background': 'enter 发送 · 后台代理仍在运行 · ctrl+q 一并退出',
     'transcript.thinking': '思考中… ',
     'transcript.pending': '…',
     'transcript.attemptDiscarded': '· 本次尝试已丢弃',
