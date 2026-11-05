@@ -22,6 +22,17 @@
         prompt: !!js ctx.tuiStartup.prompt
         record: !!js ctx.tuiStartup.record
         interruptAfterMs: !!js ctx.tuiStartup.interruptAfterMs
+# The preset selection registry: the preset declarations in `presets/*.patch.yml`
+# inject the `agentPresets` service this provides; without it they stay pending
+# forever ("waiting for service: agentPresets") and `/preset` is a no-op. The
+# web app composes the same row; our patch file is listed before the preset
+# files in `package.json` `dsh.bundle.patch`, so the registry mounts first.
+- insert:
+    - id: agent-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config:
+        default: standard
+
 # HMR stays enabled with the base default `root: []` — configuration watches
 # only, no module watching: profile patch changes (e.g. MCP rows added through
 # the conversation) apply live, while the dev-linked bundle's rebuilt code is
