@@ -120,6 +120,8 @@ export interface AgentDriver {
   readonly busy: boolean
   /** Aggregated terminal-visible state; see {@link DriverStatus}. */
   readonly status: DriverStatus
+  /** Whether an interrupt (Esc / Ctrl+C) has parent-side work to stop. */
+  readonly interruptible: boolean
   /** Current selection route, live. */
   get route(): { provider: string, model: string, effort: string | undefined }
   /** Submit one user turn (creates the session on first use; queues while running). */
@@ -224,6 +226,8 @@ export async function createDriver(
   const openAttempts = new Set<string>()
   /** Live subagent activations, keyed by the `subagent/start`/`end` run id. */
   const liveSubagents = new Set<string>()
+  /** Child session id → its live run ids; keys the orphan cleanup below. */
+  const childRuns = new Map<string, Set<string>>()
   let blocked: BlockedKind | undefined
   let lastStatus: DriverStatus = aggregateStatus({
     running: false,
@@ -272,6 +276,11 @@ export async function createDriver(
     void wired.whenIdle().then(() => {
       reaping = false
       if (agent !== wired) return
+      // A wake in the microtask gap between the settle resolution and this
+      // handler re-enters `running` synchronously; the live mirror is the
+      // authority, so a genuinely restarted turn must survive the reap.
+      if (wired.status !== 'idle') return
+      running = false
       maintenance = false
       openAttempts.clear()
       publishStatus()
@@ -342,13 +351,54 @@ export async function createDriver(
       // must happen on the agent's own scoped context — scope filtering keys the
       // dispatch by the delegating parent and would leak siblings on the root ctx.
       wired.ctx.on('subagent/start', (info) => {
-        liveSubagents.add(String(info.runId))
+        const runId = String(info.runId)
+        const childId = String(info.id)
+        liveSubagents.add(runId)
+        const runs = childRuns.get(childId) ?? new Set<string>()
+        runs.add(runId)
+        childRuns.set(childId, runs)
         publishStatus()
       }),
       wired.ctx.on('subagent/end', (info) => {
-        liveSubagents.delete(String(info.runId))
+        const runId = String(info.runId)
+        const childId = String(info.id)
+        liveSubagents.delete(runId)
+        const runs = childRuns.get(childId)
+        if (runs !== undefined) {
+          runs.delete(runId)
+          if (runs.size === 0) childRuns.delete(childId)
+        }
         publishStatus()
       }),
+      // A missed `subagent/end` would strand the aggregate at busy forever:
+      // the settle watcher deliberately leaves subagents alone because
+      // children legitimately outlive a settled parent. A disposed child can
+      // never produce more work, so its disposal is the authoritative orphan
+      // cleanup (non-local children have no Agent and no orphan path).
+      ctx.on('agent/disposed', ({ agent: subject }) => {
+        const childId = String(subject.id)
+        const runs = childRuns.get(childId)
+        if (runs === undefined) return
+        childRuns.delete(childId)
+        for (const runId of runs) liveSubagents.delete(runId)
+        publishStatus()
+      }),
+      // Belt-and-braces reconcile: any single missed `agent/status` or stream
+      // `end` event used to leave the spinner spinning after a cancel. While
+      // the wired agent's own mirror says idle, no parent-side work can be in
+      // flight, so a low-frequency tick heals the stale flags. Maintenance is
+      // exempt: compaction runs while the public status stays idle, and only
+      // `whenIdle()` — which waits for it — may clear that flag.
+      (() => {
+        const timer = setInterval(() => {
+          if (agent !== wired || wired.status !== 'idle') return
+          if (!running && openAttempts.size === 0) return
+          running = false
+          openAttempts.clear()
+          publishStatus()
+        }, 5_000)
+        return () => clearInterval(timer)
+      })(),
     )
   }
 
@@ -456,6 +506,10 @@ export async function createDriver(
     },
     get status(): DriverStatus {
       return lastStatus
+    },
+    /** Whether an interrupt (Esc / Ctrl+C) has parent-side work to stop. */
+    get interruptible(): boolean {
+      return running || maintenance
     },
     get route(): { provider: string, model: string, effort: string | undefined } {
       const current = selectionRef?.current
@@ -567,6 +621,7 @@ export async function createDriver(
       reaping = false
       openAttempts.clear()
       liveSubagents.clear()
+      childRuns.clear()
       publishStatus()
     },
     async flush(): Promise<void> {

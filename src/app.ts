@@ -1543,7 +1543,7 @@ export class TuiApp {
           return { consume: true }
         }
         if (matchesKey(data, Key.ctrl('c'))) {
-          if (this.driver.running) {
+          if (this.driver.interruptible) {
             this.driver.cancel()
             return { consume: true }
           }
@@ -1556,7 +1556,7 @@ export class TuiApp {
           }
           return { consume: true }
         }
-        if (matchesKey(data, Key.escape) && this.driver.running) {
+        if (matchesKey(data, Key.escape) && this.driver.interruptible) {
           this.driver.cancel()
           return { consume: true }
         }
