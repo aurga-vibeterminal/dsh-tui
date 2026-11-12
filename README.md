@@ -27,7 +27,7 @@ The package is **not yet published** — one-time setup from a fresh machine:
 **1. Install dsh** (the DeepSeek Harness CLI):
 
 ```sh
-npm install -g @deepseek-ai/dsh
+npm install -g @deepseek-ai/dsh@latest
 ```
 
 **2. Install pnpm** (the repo's package manager):
