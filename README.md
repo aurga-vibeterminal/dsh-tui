@@ -36,7 +36,7 @@ npm install -g @deepseek-ai/dsh@latest
 npm install -g pnpm
 ```
 
-**3. Build the local checkout:**
+**3. Build the local checkout** (only for the local-path variant below):
 
 ```sh
 cd D:\path\to\dsh-tui
@@ -51,7 +51,7 @@ pnpm build         # tsdown → lib/
 ```sh
 dsh plugin --profile tui add D:\path\to\dsh-tui     # local path (dev)
 # or, without a local checkout:
-dsh plugin --profile tui add github:aurga-vibeterminal/dsh-tui   # git source: pnpm clones and builds it via `prepare` (see note)
+dsh plugin --profile tui add github:aurga-vibeterminal/dsh-tui   # git source: ships prebuilt lib/ — installs clean, no approval step (see note)
 ```
 
 Then launch:
@@ -66,7 +66,7 @@ dsh tui --model deepseek-account/deepseek-flash   # explicit model route
 
 Once published as `@vterminal/dsh-tui`, the shorthand `dsh plugin --profile tui add @vterminal/dsh-tui` will work.
 
-> **Git-source note.** `github:…` runs `pnpm add` inside the profile: pnpm clones the repository, runs the bundle's `prepare` script (`tsdown` → `lib/`), and links the built snapshot — no manual checkout or build needed. pnpm ≥ 10.26 gates dependency build scripts behind `allowBuilds`, so the first install may report the build as pending; approve it (`pnpm approve-builds` in the profile, or dsh's guided approval) and re-run the `add`. The install is pinned to the cloned commit — update by re-running the `add`.
+> **Git-source note.** `github:…` runs `pnpm add` inside the profile, and pnpm (≥ 10.26) blocks any git-hosted package whose install needs build scripts — an `allowBuilds` approval dance no user should have to do. So the repository **commits the built `lib/`** and declares **no install-time scripts** (there is no `prepare`): the fetched snapshot is linked as-is, nothing runs, nothing needs approving, and no `pnpm-workspace.yaml` has to be touched. One command, done. CI rebuilds `lib/` and fails the build if the committed copy is stale — always rebuild (`pnpm build`) and commit `lib/` together with `src/` changes. The install is pinned to the fetched commit — update by re-running the `add`.
 
 The first `add` initializes the profile over `dsh-base`; the bundle contributes a `tui-startup` provider (flag parsing) and a `tui-runner` (the terminal app). HMR stays enabled with the base default `root: []` — configuration watches only, no module watching: profile patch changes (e.g. newly added MCP rows) apply live and `/reload` forces a reconcile, while module-code changes — including the dev-linked bundle's own rebuilds — are never hot-swapped under the fullscreen app and report a restart.
 
@@ -74,7 +74,7 @@ The first `add` initializes the profile over `dsh-base`; the bundle contributes 
 
 ```sh
 pnpm install
-pnpm build         # tsdown → lib/
+pnpm build         # tsdown → lib/ (tracked: rebuild and commit lib/ together with src/ changes)
 pnpm typecheck
 pnpm test
 ```

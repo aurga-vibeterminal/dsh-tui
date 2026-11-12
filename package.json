@@ -39,7 +39,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "record": "node tools/record.mjs",
-    "prepare": "tsdown"
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "1.3.0",

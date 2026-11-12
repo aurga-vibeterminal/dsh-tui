@@ -25,3 +25,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
+      # lib/ is committed so git installs run no build scripts (pnpm allowBuilds);
+      # a rebuild from the committed sources must reproduce it byte for byte.
+      - name: Committed lib/ is fresh
+        if: matrix.os == 'ubuntu-latest'
+        run: git diff --exit-code -- lib

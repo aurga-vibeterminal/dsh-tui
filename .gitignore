@@ -1,5 +1,4 @@
 node_modules/
-lib/
 *.log
 .dsh-test/
 .DS_Store
