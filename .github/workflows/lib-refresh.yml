@@ -1,14 +1,14 @@
 name: lib refresh
 
 # Committed lib/ is what `github:` installs actually run (the package has no
-# install-time scripts by design). When a push to master changes src/ without
+# install-time scripts by design). When a push to main changes src/ without
 # the rebuilt lib/, build it here and push the artifact back, so the tip of
-# master is always installable as-is. The commit is skipped when lib/ is
+# main is always installable as-is. The commit is skipped when lib/ is
 # already fresh. Free plan friendly: public repo, GITHUB_TOKEN only.
 
 on:
   push:
-    branches: [master]
+    branches: [main]
 
 permissions:
   contents: write
