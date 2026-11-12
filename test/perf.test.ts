@@ -52,7 +52,10 @@ describe('fold performance', () => {
     const elapsed = performance.now() - started
     // eslint-disable-next-line no-console
     console.log(`fold: ${String(stream.length)} events in ${elapsed.toFixed(0)}ms; items=${String(model.items.length)}`)
-    expect(elapsed).toBeLessThan(1000)
+    // One second interactive locally; shared CI runners (windows-latest especially)
+    // have noisier timings, so allow headroom there while still catching
+    // order-of-magnitude regressions.
+    expect(elapsed).toBeLessThan(process.env.CI ? 2_500 : 1_000)
     expect(model.items.length).toBeGreaterThan(5000)
   })
 
