@@ -1,0 +1,44 @@
+name: lib refresh
+
+# Committed lib/ is what `github:` installs actually run (the package has no
+# install-time scripts by design). When a push to master changes src/ without
+# the rebuilt lib/, build it here and push the artifact back, so the tip of
+# master is always installable as-is. The commit is skipped when lib/ is
+# already fresh. Free plan friendly: public repo, GITHUB_TOKEN only.
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lib-refresh-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Push refreshed lib/ if the committed copy is stale
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib
+          if git diff --cached --quiet; then
+            echo 'lib/ is fresh — nothing to push'
+            exit 0
+          fi
+          git commit -m 'build: refresh committed lib/ [skip ci]'
+          git push
